@@ -1,0 +1,42 @@
+name: Lumen
+options:
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+packages:
+  LumenCore:
+    path: .
+targets:
+  Lumen:
+    type: application
+    platform: macOS
+    sources: [Sources/LumenApp]
+    dependencies:
+      - package: LumenCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.lumen.mac
+        PRODUCT_NAME: Lumen
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_CFBundleDisplayName: Lumen
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: NO
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Sources/LumenApp/Lumen.entitlements
+        COMBINE_HIDPI_IMAGES: YES
+schemes:
+  Lumen:
+    build:
+      targets:
+        Lumen: all
+    run:
+      config: Debug
+    archive:
+      config: Release
