@@ -5,6 +5,7 @@ Working notes for what comes after v1. Ordering is by what hurts a real session 
 ## Done
 
 - **Patch-style multi-file edits.** `apply_patch` reviews one `*** Begin Patch` block as a single approval card, with per-file apply/reject and the existing recovery-snapshot and Undo path.
+- **Ask the user a question.** `ask_user` blocks the run until the user picks one of two suggested answers or types their own, instead of guessing or stalling. No policy auto-answers it; Stop leaves an unanswered tool error.
 
 ## Next
 
