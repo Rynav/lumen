@@ -1,3 +1,9 @@
+# 🚨 DISCLAIMER
+
+> [!CAUTION]
+> This is straight up ai slop made with deepseek v4.1 flash and gpt6 astra. Not a single line of code was checked by me or any human in this instance. Use at your own risk. 
+> Only this disclaimer was added by my, everything else is done by an LLM.
+
 # Lumen
 
 A native macOS 14+ coding agent built with Swift 6 and SwiftUI. Provider credentials stay in Keychain; the app uses your own provider accounts or a local OpenAI-compatible server.
@@ -21,7 +27,7 @@ The build script uses `/Applications/Xcode.app` when `DEVELOPER_DIR` is not set.
 
 Open **Lumen → Settings → Providers**, add a profile, enter its API base URL and default model, and save its credentials. Custom headers are also stored in Keychain. Use **Test Connection** to fetch the model list. Local endpoints may use an empty key. OpenAI-compatible endpoints normally use a URL ending in `/v1`.
 
-The **Add provider** menu includes presets for OpenAI, **Anthropic** (Messages API), **OpenRouter**, **OpenCode Zen**, and a local OpenAI-compatible server; each routes through the matching streaming client. Anthropic uses `x-api-key` and `anthropic-version`; OpenRouter and OpenCode are OpenAI-compatible gateways.
+The **Add provider** menu includes presets for OpenAI, **Anthropic** (Messages API), **OpenRouter**, **OpenCode Console**, the legacy **OpenCode Zen** gateway, and a local OpenAI-compatible server; each routes through the matching streaming client. Anthropic uses `x-api-key` and `anthropic-version`. OpenCode Console reads your workspace config (`GET /api/v2/config`) and sends each model to the API family it names (Chat Completions, Responses, or Messages); OpenRouter and Zen are OpenAI-compatible gateways.
 
 Choose a provider and model in the chat composer. Use the model menu's **Enter model ID…** action when the server does not support model listing. Switching either selection affects the next turn. Optional per-million-token prices apply only to the profile's default model; costs are estimates, not billing statements. The composer footer reports the last response's input and output tokens, its measured output tokens per second, and that estimate.
 
