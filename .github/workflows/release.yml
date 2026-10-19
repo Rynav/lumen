@@ -1,0 +1,53 @@
+name: Release
+
+# Pushing a version tag (0.1.0 or v0.1.0) runs the tests, packages the DMG, and
+# publishes it as a GitHub Release. Nothing else triggers this workflow.
+on:
+  push:
+    tags: ["v*", "[0-9]*"]
+
+jobs:
+  test:
+    # Public preview image (macOS 27 + Xcode 27). Move to macos-27 when GitHub
+    # promotes it to GA. Kept in step with the dmg job so both use one SDK.
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test core
+        run: swift test
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build app
+        run: ./scripts/build.sh
+
+  dmg:
+    needs: test
+    # Xcode 27 links the macOS 27 SDK, so macOS 26+ shows the current design
+    # instead of the legacy appearance an older SDK build gets.
+    runs-on: xcode-27
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      # No Developer ID in CI, so release.sh takes its ad-hoc path. The tag
+      # becomes the app's version, so the release and the build agree.
+      - name: Build disk image
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ./scripts/release.sh "$TAG"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lumen-dmg
+          path: dist/Lumen.dmg
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/Lumen.dmg \
+            --title "Lumen $TAG" \
+            --generate-notes \
+            --notes "This DMG is **not notarized**, so macOS blocks its first launch. Right-click Lumen.app and choose **Open** (macOS 14), or allow it in **System Settings → Privacy & Security → Open Anyway** (macOS 15+)."

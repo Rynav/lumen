@@ -1,6 +1,10 @@
 #!/bin/bash
 # Archive, sign, and package a distributable DMG.
 #
+# Usage: scripts/release.sh [version]
+# The optional version (v1.2.0 or 1.2.0) becomes the app's MARKETING_VERSION;
+# without it the value in project.yml stands.
+#
 # With a paid Apple Developer Program membership, set both of these and the app
 # is Developer ID signed, notarized and stapled:
 #   NOTARY_PROFILE           keychain profile from `xcrun notarytool store-credentials`
@@ -24,6 +28,10 @@ APP=build/Lumen.app
 STAGE=build/dmg
 DMG=dist/Lumen.dmg
 IDENTITY="${DEVELOPER_ID_APPLICATION:--}"
+# bash 3.2 (macOS /bin/bash) rejects an empty array under `set -u`, hence the
+# guarded expansion at the xcodebuild call.
+VERSION_ARGS=()
+[[ -z "${1:-}" ]] || VERSION_ARGS=(MARKETING_VERSION="${1#v}")
 
 rm -rf "$ARCHIVE" "$APP" "$STAGE" dist
 mkdir -p dist
@@ -35,6 +43,7 @@ xcodebuild -quiet -project Lumen.xcodeproj -scheme Lumen -configuration Release 
   -destination "platform=macOS,arch=$(uname -m)" -archivePath "$ARCHIVE" \
   CODE_SIGN_STYLE=Manual \
   CODE_SIGN_IDENTITY="$IDENTITY" \
+  "${VERSION_ARGS[@]+"${VERSION_ARGS[@]}"}" \
   archive
 
 cp -R "$ARCHIVE/Products/Applications/Lumen.app" "$APP"
