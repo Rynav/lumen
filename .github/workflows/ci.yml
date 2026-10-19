@@ -16,3 +16,19 @@ jobs:
         run: brew install xcodegen
       - name: Build app
         run: ./scripts/build.sh
+
+  dmg:
+    needs: test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      # No Developer ID in CI, so release.sh takes its ad-hoc path.
+      - name: Build disk image
+        run: ./scripts/release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lumen-dmg
+          path: dist/Lumen.dmg
+          if-no-files-found: error
