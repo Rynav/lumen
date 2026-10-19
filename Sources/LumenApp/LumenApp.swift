@@ -1,24 +1,41 @@
+import AppKit
 import LumenCore
 import SwiftUI
 
 @main
 struct LumenApp: App {
-    @State private var profiles: [ProviderProfile] = []
-    @State private var systemPrompt = "You are a helpful coding agent. Inspect the workspace before changing files."
-    @State private var maxIterations = 25
+    @State private var chat = ChatModel()
 
     var body: some Scene {
         Window("Lumen", id: "main") {
-            NavigationSplitView {
-                List { Label("Workspaces", systemImage: "folder") }
-                    .navigationSplitViewColumnWidth(min: 180, ideal: 220)
-            } detail: {
-                ContentUnavailableView("Lumen", systemImage: "sparkle", description: Text("Add a provider in Settings to get started."))
+            RootView(chat: chat)
+                .frame(minWidth: 1000, minHeight: 640)
+        }
+        .defaultSize(width: 1240, height: 800)
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Conversation") { chat.newConversation() }
+                    .keyboardShortcut("n")
+                    .disabled(chat.isBusy)
+                Button("Open Project…") { openProject() }
+                    .keyboardShortcut("o")
+                    .disabled(chat.isBusy)
             }
-            .frame(minWidth: 820, minHeight: 560)
         }
         Settings {
-            SettingsView(profiles: $profiles, systemPrompt: $systemPrompt, maxIterations: $maxIterations)
+            SettingsView(profiles: $chat.profiles, systemPrompt: $chat.systemPrompt,
+                          maxIterations: $chat.maxIterations, reasoning: $chat.reasoning,
+                          approvalPolicy: $chat.approvalPolicy, mcpServers: $chat.mcpServers,
+                          testConnection: ChatModel.testConnection, stopRequests: { chat.stop() })
         }
+    }
+
+    @MainActor private func openProject() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        if panel.runModal() == .OK, let url = panel.url { chat.openWorkspace(url) }
     }
 }
