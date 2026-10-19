@@ -55,4 +55,4 @@ Lumen/
 - User adds an OpenAI key, opens a project folder, asks "add a unit test for X", watches the agent read files, propose a diff, wait for approval, apply it, and run the tests, all streaming live.
 - Same flow works with Anthropic and with a local OpenAI-compatible endpoint (e.g. Ollama).
 - Stop reliably cancels both the network stream and any running process.
-- `release.sh` produces a signed, notarized, stapled DMG that passes `spctl --assess` and `stapler validate`.
+- `release.sh` produces a DMG: Developer ID signed, notarized and stapled (passing `spctl --assess` and `stapler validate`) when credentials are set, ad-hoc signed with documented first-launch steps otherwise.

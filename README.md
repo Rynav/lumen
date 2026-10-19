@@ -108,10 +108,18 @@ Choose **ChatGPT Account → Continue with ChatGPT** and approve in your browser
 ## Releasing
 
 ```sh
-NOTARY_PROFILE=... DEVELOPER_ID_APPLICATION="Developer ID Application: ..." ./scripts/release.sh
+./scripts/release.sh    # ad-hoc signed DMG
 ```
 
-Archives, signs under Hardened Runtime, notarizes, staples, and verifies with `spctl` and `stapler` — producing a DMG you can hand out.
+With a paid Apple Developer Program membership, add both variables and the same script signs with your Developer ID, notarizes, staples, and verifies the result:
+
+```sh
+NOTARY_PROFILE=lumen-notary DEVELOPER_ID_APPLICATION="Developer ID Application: Name (TEAMID)" ./scripts/release.sh
+```
+
+Either way it archives, signs under Hardened Runtime, and writes `dist/Lumen.dmg`.
+
+**First launch without a Developer ID.** Gatekeeper blocks an ad-hoc build until the recipient approves it once: right-click the app and choose **Open** on macOS 14, or use **System Settings → Privacy & Security → Open Anyway** on macOS 15 and later. The app is identical either way — notarization only removes that step.
 
 ## Contributing
 
