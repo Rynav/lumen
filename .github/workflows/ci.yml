@@ -7,7 +7,9 @@ on:
 
 jobs:
   test:
-    runs-on: macos-15
+    # Public preview image (macOS 27 + Xcode 27). Move to macos-27 when GitHub
+    # promotes it to GA. Kept in step with the dmg job so both use one SDK.
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
       - name: Test core
@@ -19,7 +21,9 @@ jobs:
 
   dmg:
     needs: test
-    runs-on: macos-15
+    # Xcode 27 links the macOS 27 SDK, so macOS 26+ shows the current design
+    # instead of the legacy appearance an older SDK build gets.
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
