@@ -2,7 +2,7 @@
 
 > [!CAUTION]
 > This is straight up ai slop made with deepseek v4.1 flash and gpt6 astra. Not a single line of code was checked by me or any human in this instance. Use at your own risk. 
-> Only this disclaimer was added by my, everything else is done by an LLM.
+> Only this disclaimer was added by me, everything else is done by an LLM.
 
 # Lumen
 
