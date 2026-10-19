@@ -49,7 +49,6 @@ struct NoteView: View {
                     .font(size == .compact ? .caption : .callout)
                     .foregroundStyle(size == .compact || title != nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                     .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if size == .full, let dismiss {
