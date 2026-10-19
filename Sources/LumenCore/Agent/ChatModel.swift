@@ -536,6 +536,33 @@ public final class ChatModel {
         persistConfiguration()
     }
 
+    /// Removes a saved chat. Deleting the active chat switches to another chat in
+    /// the same project, or to a fresh one when it was the last.
+    public func deleteConversation(_ id: UUID) {
+        guard !isBusy, let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        conversations.remove(at: index)
+        if id == currentConversationID {
+            if let next = conversations.first(where: { $0.projectPath == workspace?.root.path }) {
+                load(next)
+            } else {
+                startConversation(workspace: workspace, saveCurrent: false)
+            }
+            persistConfiguration()
+        }
+        persistConversations()
+    }
+
+    /// Removes a project from the sidebar along with its saved chats. Files on
+    /// disk are untouched.
+    public func removeProject(_ path: String) {
+        guard !isBusy else { return }
+        projectPaths.removeAll { $0 == path }
+        conversations.removeAll { $0.projectPath == path }
+        if workspace?.root.path == path { startConversation(workspace: nil, saveCurrent: false) }
+        persistConversations()
+        persistConfiguration()
+    }
+
     /// Loads a conversation into the active editor, opening its workspace on demand.
     private func load(_ conversation: ChatConversation) {
         var conversation = conversation
@@ -560,8 +587,8 @@ public final class ChatModel {
         workspaceRevision += 1
     }
 
-    private func startConversation(workspace: WorkspaceService?) {
-        saveConversation()
+    private func startConversation(workspace: WorkspaceService?, saveCurrent: Bool = true) {
+        if saveCurrent { saveConversation() }
         let previousWorkspace = self.workspace
         self.workspace = workspace
         currentConversationID = UUID()

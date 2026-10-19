@@ -45,4 +45,28 @@ import Testing
         #expect(restored.draft == "half-written follow-up")
         #expect(restored.workspace == nil)
     }
+
+    @Test @MainActor func deletingChatsAndProjectsForgetsThem() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ConfigurationStore(directory: directory)
+        let chat = ChatModel(configurationStore: store, loadAccounts: { [:] })
+
+        let chatID = chat.currentConversationID
+        chat.messages = [Message(role: .user, text: "throwaway")]
+        chat.newChat()
+        chat.deleteConversation(chatID)
+        #expect(!chat.conversations.contains { $0.id == chatID })
+
+        chat.openWorkspace(directory)
+        let projectPath = try #require(chat.workspace?.root.path)
+        let projectChatID = chat.currentConversationID
+        chat.removeProject(projectPath)
+        #expect(chat.projectPaths.isEmpty && chat.workspace == nil && chat.messages.isEmpty)
+        #expect(!chat.conversations.contains { $0.id == projectChatID })
+
+        let restored = ChatModel(configurationStore: store, loadAccounts: { [:] })
+        #expect(restored.projectPaths.isEmpty)
+        #expect(!restored.conversations.contains { $0.id == chatID || $0.id == projectChatID })
+    }
 }

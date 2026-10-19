@@ -10,6 +10,7 @@ struct RootView: View {
     @State private var showingInspector = true
     @State private var inspectorTab: InspectorTab = .activity
     @State private var choosingProject = false
+    @State private var deleting: SidebarItem?
     @FocusState private var composerFocused: Bool
 
     private var conversationTitle: String {
@@ -88,8 +89,7 @@ struct RootView: View {
             if !projectChats.isEmpty {
                 Section("Conversations") {
                     ForEach(projectChats) { conversation in
-                        Label(conversation.title, systemImage: "bubble.left")
-                            .tag(SidebarItem.conversation(conversation.id))
+                        conversationRow(conversation)
                     }
                 }
             }
@@ -98,13 +98,47 @@ struct RootView: View {
             if !standalone.isEmpty {
                 Section("Chats") {
                     ForEach(standalone) { conversation in
-                        Label(conversation.title, systemImage: "bubble.left")
-                            .tag(SidebarItem.conversation(conversation.id))
+                        conversationRow(conversation)
                     }
                 }
             }
         }
         .listStyle(.sidebar)
+        .confirmationDialog(deleting.map { title(for: $0) } ?? "", isPresented: Binding(
+            get: { deleting != nil }, set: { if !$0 { deleting = nil } }
+        ), presenting: deleting) { item in
+            switch item {
+            case .conversation(let id):
+                Button("Delete Chat", role: .destructive) { chat.deleteConversation(id); deleting = nil }
+            case .project(let path):
+                Button("Remove Project and Chats", role: .destructive) { chat.removeProject(path); deleting = nil }
+            }
+        } message: { item in
+            switch item {
+            case .conversation:
+                Text("This deletes the chat's messages from Lumen. Files on disk are untouched.")
+            case .project:
+                Text("This removes the project and deletes its saved chats from Lumen. Files on disk are untouched.")
+            }
+        }
+    }
+
+    private func title(for item: SidebarItem) -> String {
+        switch item {
+        case .project(let path): URL(fileURLWithPath: path).lastPathComponent
+        case .conversation(let id): chat.conversations.first { $0.id == id }?.title ?? "Chat"
+        }
+    }
+
+    private func conversationRow(_ conversation: ChatConversation) -> some View {
+        Label(conversation.title, systemImage: "bubble.left")
+            .tag(SidebarItem.conversation(conversation.id))
+            .contextMenu {
+                Button("Delete Chat", role: .destructive) {
+                    deleting = .conversation(conversation.id)
+                }
+                .disabled(chat.isBusy)
+            }
     }
 
     private func projectRow(_ path: String) -> some View {
@@ -122,6 +156,10 @@ struct RootView: View {
         }
         .tag(SidebarItem.project(path))
         .help(path)
+        .contextMenu {
+            Button("Remove Project", role: .destructive) { deleting = .project(path) }
+                .disabled(chat.isBusy)
+        }
     }
 
     // MARK: Toolbar
