@@ -10,6 +10,7 @@ public enum AgentEvent: Sendable {
     case applied(AppliedChange)
     case commandApproval(CommandProposal)
     case command(CommandUpdate)
+    case question(UserQuestion)
 }
 
 public actor AgentSession {
@@ -133,7 +134,8 @@ public actor AgentSession {
                         onProposal: { output.yield(.approval($0)) },
                         onBatchProposal: { output.yield(.editBatch($0)) },
                         onApplied: { output.yield(.applied($0)) },
-                        onCommandProposal: { output.yield(.commandApproval($0)) }, onCommandUpdate: { output.yield(.command($0)) })
+                        onCommandProposal: { output.yield(.commandApproval($0)) }, onCommandUpdate: { output.yield(.command($0)) },
+                        onQuestion: { output.yield(.question($0)) })
                 }
                 else { result = ToolResult(callID: call.id, content: "Open a project folder to use tools.", isError: true) }
                 let message = Message(role: .tool, parts: [.toolResult(result)])

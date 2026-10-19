@@ -98,6 +98,9 @@ struct ConversationView: View {
             CommandApprovalView(proposal: proposal, decide: { chat.decideCommand(approved: $0) },
                                 stop: { chat.stop() })
                 .id(proposal.id)
+        } else if let question = chat.pendingQuestion {
+            QuestionView(question: question, answer: { chat.answerQuestion($0) })
+                .id(question.id)
         }
     }
 

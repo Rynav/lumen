@@ -58,6 +58,19 @@ public struct ToolResult: Codable, Equatable, Sendable {
     public static let toolsDisabled = "Tools are disabled: this task reached its maximum number of steps. Nothing was run. Reply with text only; the user must send a new message to continue."
 }
 
+/// A question the model asks the user mid-task. `options` holds exactly two
+/// suggested answers; the user may pick one or type their own reply.
+public struct UserQuestion: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let question: String
+    public let options: [String]
+    public init(id: UUID = UUID(), question: String, options: [String]) {
+        self.id = id
+        self.question = question
+        self.options = options
+    }
+}
+
 public enum ContentPart: Codable, Equatable, Sendable {
     case text(String)
     case reasoningSummary(id: String, text: String)

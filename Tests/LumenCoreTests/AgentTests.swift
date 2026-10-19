@@ -96,6 +96,50 @@ final class MockProvider: LLMProvider, @unchecked Sendable {
         #expect(try await ToolRegistry(workspace: workspace).execute(call).isError)
     }
 
+    @Test func questionBlocksUntilAnsweredAndReachesTheNextTurn() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let call = ToolCall(id: "ask", name: "ask_user",
+                            arguments: #"{"question":"Which database?","options":["SQLite","Postgres"]}"#)
+        let provider = MockProvider([[.toolCall(call), .finished], [.text("Using SQLite."), .finished]])
+        let gate = ApprovalGate()
+        var asked: UserQuestion?
+        for try await event in AgentSession().run(messages: [], model: "mock", provider: provider,
+                workspace: try WorkspaceService(root: root), maxIterations: 3, approval: gate) {
+            if case .question(let question) = event {
+                asked = question
+                // The run is still blocked on this question, so no second request exists yet.
+                #expect(provider.history.count == 1)
+                await gate.answer(id: question.id, text: "SQLite")
+            }
+        }
+        let question = try #require(asked)
+        #expect(question.options == ["SQLite", "Postgres"])
+        #expect(provider.tools.first?.map(\.name).contains("ask_user") == true)
+        let results = provider.history[1].flatMap(\.parts).compactMap { part -> ToolResult? in
+            if case .toolResult(let result) = part { return result }; return nil
+        }
+        #expect(results.first?.content.contains("The user answered: SQLite") == true)
+        #expect(results.first?.isError == false)
+    }
+
+    @Test func unansweredQuestionReturnsAnErrorInsteadOfBlocking() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspace = try WorkspaceService(root: root)
+        let call = ToolCall(id: "ask", name: "ask_user", arguments: #"{"question":"Which?","options":["a","b"]}"#)
+        #expect(try await ToolRegistry(workspace: workspace).execute(call).isError)
+        let gate = ApprovalGate()
+        let cancelled = try await ToolRegistry(workspace: workspace).execute(call, approval: gate, onQuestion: { _ in
+            Task { await gate.cancel() }
+        })
+        #expect(cancelled.isError)
+        let tooManyOptions = ToolCall(id: "ask", name: "ask_user", arguments: #"{"question":"Which?","options":["a"]}"#)
+        #expect(try await ToolRegistry(workspace: workspace).execute(tooManyOptions, approval: ApprovalGate()).isError)
+    }
+
     @Test func toolsRunAndResultsReachNextTurn() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -164,8 +208,8 @@ final class MockProvider: LLMProvider, @unchecked Sendable {
                                      [.text("Done."), .finished]])
         for try await _ in AgentSession().run(messages: [], model: "mock", provider: provider,
             workspace: try WorkspaceService(root: root), maxIterations: 3) {}
-        // Without an approval gate the mutating tools are withheld from every request,
-        // and the final request advertises nothing at all.
+        // Without an approval gate the tools that need a live user channel are
+        // withheld from every request, and the final request advertises nothing at all.
         #expect(provider.tools.count == 3)
         #expect(provider.tools[0].map(\.name) == ["list_files", "read_file", "search_files"])
         #expect(provider.tools[1].map(\.name) == ["list_files", "read_file", "search_files"])
@@ -211,5 +255,38 @@ final class MockProvider: LLMProvider, @unchecked Sendable {
         }
         await task.value
         #expect(provider.history.isEmpty)
+    }
+
+    @Test @MainActor func chatSurfacesTheQuestionAndSendsTheAnswerBack() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let chat = ChatModel(configurationStore: ConfigurationStore(directory: root.appendingPathComponent("config")),
+                             loadAccounts: { [:] })
+        chat.instructionsDirectory = root.appendingPathComponent("absent")
+        chat.openWorkspace(root)
+        let call = ToolCall(id: "ask", name: "ask_user",
+                            arguments: #"{"question":"Which database?","options":["SQLite","Postgres"]}"#)
+        let provider = MockProvider([[.toolCall(call), .finished], [.text("Done."), .finished]])
+        chat.providerFactory = { _, _ in provider }
+        let profile = ProviderProfile(name: "Mock", kind: .openAI, baseURL: "https://fixture.invalid/v1", defaultModel: "mock")
+        chat.profiles = [profile]
+        chat.selectedProfileID = profile.id
+        chat.model = "mock"
+        chat.draft = "Set up a database"
+        chat.send()
+        // Bounded: a broken run must fail the test instead of hanging it.
+        for _ in 0..<1000 where chat.pendingQuestion == nil { await Task.yield() }
+        let question = try #require(chat.pendingQuestion)
+        #expect(question.options == ["SQLite", "Postgres"])
+        #expect(chat.isAwaitingApproval)
+        chat.answerQuestion("Postgres")
+        await chat.runTask?.value
+        #expect(chat.pendingQuestion == nil)
+        #expect(!chat.isAwaitingApproval)
+        let results = provider.history[1].flatMap(\.parts).compactMap { part -> ToolResult? in
+            if case .toolResult(let result) = part { return result }; return nil
+        }
+        #expect(results.first?.content.contains("The user answered: Postgres") == true)
     }
 }

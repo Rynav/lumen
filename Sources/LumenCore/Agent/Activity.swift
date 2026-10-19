@@ -40,6 +40,7 @@ public struct AgentAction: Identifiable, Equatable, Sendable {
                         title = "Apply patch"
                         target = count == 1 ? "1 file" : count > 1 ? "\(count) files" : "Project files"
                     case "run_command": title = "Run command"; target = args?["executable"]?.string ?? "Project command"
+                    case "ask_user": title = "Ask you"; target = args?["question"]?.string ?? "Question"
                     default:
                         let mcp = call.name.hasPrefix("mcp__") ? call.name.dropFirst(5) : nil
                         let parts = mcp?.split(separator: "__", maxSplits: 1) ?? []

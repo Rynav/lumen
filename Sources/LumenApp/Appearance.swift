@@ -31,6 +31,7 @@ enum LumenStyle {
         case "list_files": "folder"
         case "edit_file": "square.and.pencil"
         case "run_command": "terminal"
+        case "ask_user": "questionmark.bubble"
         default: toolName.hasPrefix("mcp__") ? "wrench.and.screwdriver" : "checklist"
         }
     }

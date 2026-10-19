@@ -92,8 +92,10 @@ public final class ChatModel {
     /// transcript and inspector cards so they cannot disagree.
     public var pendingEditSelection: Set<UUID> = []
     public var pendingCommand: CommandProposal?
+    /// A question from `ask_user` waiting for the user's reply.
+    public var pendingQuestion: UserQuestion?
     public private(set) var commands: [CommandUpdate] = []
-    public var isAwaitingApproval: Bool { pendingEdit != nil || pendingEditBatch != nil || pendingCommand != nil }
+    public var isAwaitingApproval: Bool { pendingEdit != nil || pendingEditBatch != nil || pendingCommand != nil || pendingQuestion != nil }
     public private(set) var changes: [AppliedChange] = []
     public private(set) var isGitRepository = false
     public private(set) var gitStatus: [GitFileStatus] = []
@@ -356,7 +358,8 @@ public final class ChatModel {
         runTask = Task {
             defer {
                 messages = AgentSession.completingToolResults(in: messages)
-                pendingEdit = nil; pendingEditBatch = nil; pendingEditSelection = []; pendingCommand = nil; approvalGate = nil
+                pendingEdit = nil; pendingEditBatch = nil; pendingEditSelection = []; pendingCommand = nil
+                pendingQuestion = nil; approvalGate = nil
                 isRunning = false; runTask = nil; self.provider = nil
                 saveConversation()
             }
@@ -417,6 +420,7 @@ public final class ChatModel {
                         changes.append(change)
                         workspaceRevision += 1
                     case .commandApproval(let proposal): pendingCommand = proposal
+                    case .question(let question): pendingQuestion = question
                     case .command(let command):
                         if let index = commands.firstIndex(where: { $0.id == command.id }) { commands[index] = command }
                         else { commands.append(command) }
@@ -441,6 +445,7 @@ public final class ChatModel {
         pendingEditBatch = nil
         pendingEditSelection = []
         pendingCommand = nil
+        pendingQuestion = nil
         if let approvalGate { Task { await approvalGate.cancel() } }
         if let provider { Task { await provider.cancel() } }
         if let workspace { Task { await workspace.stopCommands() } }
@@ -501,6 +506,16 @@ public final class ChatModel {
         guard let proposal = pendingCommand, let gate = approvalGate else { return }
         pendingCommand = nil
         Task { await gate.decide(id: proposal.id, approved: approved) }
+    }
+
+    /// An empty answer is ignored: the tool result treats "no answer" as an error,
+    /// so an accidentally submitted blank reply must not reach the agent.
+    public func answerQuestion(_ text: String) {
+        guard let question = pendingQuestion, let gate = approvalGate else { return }
+        let answer = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !answer.isEmpty else { return }
+        pendingQuestion = nil
+        Task { await gate.answer(id: question.id, text: answer) }
     }
 
     public func undoChange(_ id: UUID) async {

@@ -36,7 +36,14 @@ public struct ToolRegistry: Sendable {
             "arguments": .object(["type": .string("array"), "items": .object(["type": .string("string")])]),
             "directory": string("Working directory relative to project root; defaults to ."),
             "timeout_seconds": .object(["type": .string("integer"), "minimum": .number(1), "maximum": .number(600)])
-        ], required: ["executable"])
+        ], required: ["executable"]),
+        definition("ask_user", "Ask the user a question when a missing detail blocks progress, and wait for their reply. Provide exactly two suggested answers in `options`; the user may pick one or type a different answer. Use this only when you cannot reasonably proceed without the answer; do not use it for routine confirmation.",
+                   properties: [
+            "question": string("The question to ask the user"),
+            "options": .object(["type": .string("array"), "items": .object(["type": .string("string")]),
+                                "minItems": .number(2), "maxItems": .number(2),
+                                "description": .string("Exactly two suggested answers; the user may also type their own")])
+        ], required: ["question", "options"])
     ]
 
     private static func string(_ description: String) -> JSONValue {
@@ -51,8 +58,9 @@ public struct ToolRegistry: Sendable {
         approvalIsEnabled ? definitions : definitions.filter { !approvalRequired.contains($0.name) }
     }
 
-    /// Tools that can change the machine, and therefore always need a gate.
-    public static let approvalRequired: Set<String> = ["edit_file", "apply_patch", "run_command"]
+    /// Tools that cannot run without a live user gate: they change the machine,
+    /// or they must ask the user directly and wait for the reply.
+    public static let approvalRequired: Set<String> = ["edit_file", "apply_patch", "run_command", "ask_user"]
 
     private static func definition(_ name: String, _ description: String, properties: [String: JSONValue], required: [String] = []) -> ToolDefinition {
         ToolDefinition(name: name, description: description, parameters: .object([
@@ -66,7 +74,8 @@ public struct ToolRegistry: Sendable {
                         onBatchProposal: @Sendable (EditBatchProposal) -> Void = { _ in },
                         onApplied: @Sendable (AppliedChange) -> Void = { _ in },
                         onCommandProposal: @Sendable (CommandProposal) -> Void = { _ in },
-                        onCommandUpdate: @escaping @Sendable (CommandUpdate) -> Void = { _ in }) async throws -> ToolResult {
+                        onCommandUpdate: @escaping @Sendable (CommandUpdate) -> Void = { _ in },
+                        onQuestion: @Sendable (UserQuestion) -> Void = { _ in }) async throws -> ToolResult {
         try Task.checkCancellation()
         do {
             guard let args = try JSONDecoder().decode(JSONValue.self, from: Data(call.arguments.utf8)).object,
@@ -121,6 +130,22 @@ public struct ToolRegistry: Sendable {
                     await workspace.discardCommand(proposal.id)
                     throw error
                 }
+            case "ask_user":
+                guard let approval else { throw ProviderError.unsupported("Questions require an explicit user approval gate.") }
+                let options: [String]
+                if let value = args["options"] {
+                    guard let array = value.array, array.allSatisfy({ $0.string != nil }) else { throw WorkspaceError.invalidArguments }
+                    options = array.compactMap(\.string)
+                } else { options = [] }
+                guard options.count == 2 else { throw WorkspaceError.invalidArguments }
+                let question = UserQuestion(question: try string("question"), options: options)
+                let answer = await approval.request(question, notify: onQuestion)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                try Task.checkCancellation()
+                guard !answer.isEmpty else {
+                    return ToolResult(callID: call.id, content: "The user did not answer. Do not retry without a new user request.", isError: true)
+                }
+                return ToolResult(callID: call.id, content: "The user answered: \(answer). Continue with that answer.")
             case "edit_file":
                 guard let approval else { throw ProviderError.unsupported("Editing requires an explicit user approval gate.") }
                 let proposal = try await workspace.prepareEdit(path: string("path"), oldText: string("old_text"), newText: string("new_text"))

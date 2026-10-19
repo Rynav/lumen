@@ -75,6 +75,10 @@ private struct ActivitySection: View {
                                         stop: { chat.stop() })
                         .id(proposal.id)
                 }
+                if let question = chat.pendingQuestion {
+                    QuestionView(question: question, answer: { chat.answerQuestion($0) })
+                        .id(question.id)
+                }
                 if actions.isEmpty && chat.commands.isEmpty {
                     InspectorEmptyState(title: "No activity yet", systemImage: "checklist",
                                         message: "File reads, searches, edits, and commands appear here as Lumen works.")

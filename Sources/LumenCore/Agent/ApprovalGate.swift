@@ -28,6 +28,7 @@ public actor ApprovalGate {
     private enum Waiting {
         case decision(id: UUID, continuation: CheckedContinuation<Bool, Never>)
         case batch(id: UUID, continuation: CheckedContinuation<Set<UUID>, Never>)
+        case question(id: UUID, continuation: CheckedContinuation<String, Never>)
     }
     private var waiting: Waiting?
     private var cancelled = false
@@ -63,6 +64,25 @@ public actor ApprovalGate {
         } onCancel: { Task { await self.cancel() } }
     }
 
+    /// A question the model asks the user. Unlike approvals this always waits for a
+    /// real reply — no policy auto-answers it. An empty string is returned when the
+    /// run is cancelled or no answer arrives.
+    public func request(_ question: UserQuestion, notify: @Sendable (UserQuestion) -> Void) async -> String {
+        await withTaskCancellationHandler {
+            guard !Task.isCancelled, !cancelled, waiting == nil else { return "" }
+            return await withCheckedContinuation { continuation in
+                waiting = .question(id: question.id, continuation: continuation)
+                notify(question)
+            }
+        } onCancel: { Task { await self.cancel() } }
+    }
+
+    public func answer(id: UUID, text: String) {
+        guard case .question(let waitingID, let continuation) = waiting, waitingID == id else { return }
+        waiting = nil
+        continuation.resume(returning: cancelled ? "" : text)
+    }
+
     public func decide(id: UUID, approved: Bool) {
         guard case .decision(let waitingID, let continuation) = waiting, waitingID == id else { return }
         waiting = nil
@@ -82,6 +102,7 @@ public actor ApprovalGate {
         switch waiting {
         case .decision(_, let continuation): continuation.resume(returning: false)
         case .batch(_, let continuation): continuation.resume(returning: [])
+        case .question(_, let continuation): continuation.resume(returning: "")
         }
     }
 }
