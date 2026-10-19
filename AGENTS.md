@@ -18,11 +18,12 @@ Lightweight is a hard requirement: no Electron, no web views for core UI, minima
 ```
 Lumen/
   Sources/LumenCore/
-    Providers/    LLMProvider protocol, OpenAIProvider, AnthropicProvider, CompatibleProvider
-    Agent/        AgentSession (actor), ToolRegistry, ApprovalPolicy
-    Tools/        one file per tool, conforming to Tool
-    Workspace/    WorkspaceService (path validation, file ops, git snapshots)
-    Persistence/  conversation store, KeychainStore
+    Providers/    LLMProvider protocol (Types), OpenAI, Anthropic, ChatGPT-account and
+                  MCP clients, HTTPTransport + SSEParser
+    Agent/        AgentSession (actor), ChatModel, ToolRegistry, ApprovalGate,
+                  SystemPrompt, Instructions, Activity
+    Workspace/    WorkspaceService (path validation, file ops, edits), CommandProcess, GitService
+    Persistence/  AppConfiguration, ConversationStore, KeychainStore
   Sources/LumenApp/   SwiftUI views, scenes, menu commands (no networking or file logic here)
   Tests/LumenCoreTests/
   project.yml

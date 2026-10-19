@@ -1,6 +1,7 @@
 .build/
 build/
 dist/
+.lumen/
 *.xcodeproj/
 .DS_Store
 .swiftpm/
