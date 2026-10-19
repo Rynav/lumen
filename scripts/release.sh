@@ -21,10 +21,11 @@ command -v xcodegen >/dev/null || { echo 'Install XcodeGen: brew install xcodege
 
 ARCHIVE=build/Lumen.xcarchive
 APP=build/Lumen.app
+STAGE=build/dmg
 DMG=dist/Lumen.dmg
 IDENTITY="${DEVELOPER_ID_APPLICATION:--}"
 
-rm -rf "$ARCHIVE" "$APP" dist
+rm -rf "$ARCHIVE" "$APP" "$STAGE" dist
 mkdir -p dist
 xcodegen generate
 
@@ -47,9 +48,13 @@ if command -v create-dmg >/dev/null; then
     --icon "Lumen.app" 150 180 --app-drop-link 390 180 "$DMG" "$APP"
 else
   echo 'Tip: brew install create-dmg for a styled disk image.' >&2
+  # Stage the layout every image needs: the app and a drag-to-install shortcut.
+  mkdir -p "$STAGE"
+  cp -R "$APP" "$STAGE/"
+  ln -s /Applications "$STAGE/Applications"
   # `diskutil` is the modern path; hdiutil still exists on older macOS.
-  diskutil image create from --volumeName Lumen --format UDZO "$APP" "$DMG" \
-    || hdiutil create -volname Lumen -srcfolder "$APP" -ov -format UDZO "$DMG"
+  diskutil image create from --volumeName Lumen --format UDZO "$STAGE" "$DMG" \
+    || hdiutil create -volname Lumen -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 fi
 
 if [[ "$IDENTITY" == "-" ]]; then

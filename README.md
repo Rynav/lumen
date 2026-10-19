@@ -117,7 +117,7 @@ With a paid Apple Developer Program membership, add both variables and the same 
 NOTARY_PROFILE=lumen-notary DEVELOPER_ID_APPLICATION="Developer ID Application: Name (TEAMID)" ./scripts/release.sh
 ```
 
-Either way it archives, signs under Hardened Runtime, and writes `dist/Lumen.dmg`.
+Either way it archives, signs under Hardened Runtime, and writes `dist/Lumen.dmg` holding the app next to an **Applications** shortcut, so installing is just a drag.
 
 **First launch without a Developer ID.** Gatekeeper blocks an ad-hoc build until the recipient approves it once: right-click the app and choose **Open** on macOS 14, or use **System Settings → Privacy & Security → Open Anyway** on macOS 15 and later. The app is identical either way — notarization only removes that step.
 
