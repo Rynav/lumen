@@ -20,12 +20,13 @@ public struct ChatConversation: Identifiable {
     fileprivate var changes: [AppliedChange]
     fileprivate var usage: TokenUsage?
     fileprivate var estimatedCost: Double?
+    fileprivate var compaction: ConversationCompaction?
     fileprivate var savedAt: Date
 
     fileprivate init(id: UUID, projectPath: String?, workspace: WorkspaceService?, messages: [Message] = [],
                      draft: String = "", profileID: UUID? = nil, commands: [CommandUpdate] = [],
                      changes: [AppliedChange] = [], usage: TokenUsage? = nil, estimatedCost: Double? = nil,
-                     savedAt: Date = Date()) {
+                     compaction: ConversationCompaction? = nil, savedAt: Date = Date()) {
         self.id = id
         self.projectPath = projectPath ?? workspace?.root.path
         self.workspace = workspace
@@ -36,12 +37,14 @@ public struct ChatConversation: Identifiable {
         self.changes = changes
         self.usage = usage
         self.estimatedCost = estimatedCost
+        self.compaction = compaction
         self.savedAt = savedAt
     }
 
     fileprivate var snapshot: ConversationSnapshot {
         ConversationSnapshot(id: id, projectPath: projectPath, messages: messages, draft: draft,
-                             profileID: profileID, usage: usage, estimatedCost: estimatedCost, savedAt: savedAt)
+                             profileID: profileID, usage: usage, estimatedCost: estimatedCost,
+                             compaction: compaction, savedAt: savedAt)
     }
 }
 
@@ -70,6 +73,13 @@ public final class ChatModel {
     /// Output tokens per second across the last turn's provider streams; nil until one reports usage.
     public private(set) var tokensPerSecond: Double?
     public var estimatedCost: Double?
+    /// Estimated size of the next request, and the selected model's window.
+    public private(set) var contextTokens = 0
+    public var contextLimit: Int { ContextWindow.tokens(for: model) }
+    /// True when older turns are standing in for a summary instead of full text.
+    public var isContextCompacted: Bool { compaction != nil }
+    /// True while that summary is being written for the next request.
+    public private(set) var isCompacting = false
     public private(set) var workspace: WorkspaceService?
     public private(set) var projectPaths: [String] = []
     public private(set) var conversations: [ChatConversation] = []
@@ -87,8 +97,12 @@ public final class ChatModel {
     public private(set) var workspaceRevision = 0
     public private(set) var isUndoing = false
     public var isBusy: Bool { isRunning || isUndoing }
-    @ObservationIgnored private var runTask: Task<Void, Never>?
+    /// Internal so tests can await a turn that `send()` started.
+    @ObservationIgnored var runTask: Task<Void, Never>?
+    /// Injectable so tests can replay scripted streams instead of the network.
+    @ObservationIgnored var providerFactory: @Sendable (ProviderProfile, ReasoningEffort) throws -> any LLMProvider = ChatModel.makeProvider
     @ObservationIgnored private var provider: (any LLMProvider)?
+    @ObservationIgnored private var compaction: ConversationCompaction?
     @ObservationIgnored private var conversationProfileID: UUID?
     @ObservationIgnored private let configurationStore: ConfigurationStore
     @ObservationIgnored private let conversationStore: ConversationStore
@@ -145,7 +159,8 @@ public final class ChatModel {
         conversations = snapshots.map { snapshot in
             var conversation = ChatConversation(id: snapshot.id, projectPath: snapshot.projectPath, workspace: nil,
                 messages: snapshot.messages, draft: snapshot.draft, profileID: snapshot.profileID,
-                usage: snapshot.usage, estimatedCost: snapshot.estimatedCost, savedAt: snapshot.savedAt)
+                usage: snapshot.usage, estimatedCost: snapshot.estimatedCost,
+                compaction: snapshot.compaction, savedAt: snapshot.savedAt)
             if snapshot.projectPath == workspace?.root.path { conversation.workspace = workspace }
             return conversation
         }
@@ -208,7 +223,7 @@ public final class ChatModel {
         isLoadingModels = true
         defer { isLoadingModels = false }
         do {
-            let available = try await Self.makeProvider(profile).modelInfo()
+            let available = try await providerFactory(profile, reasoning).modelInfo()
             guard selectedProfileID == profile.id else { return }
             modelInfo = profile.kind == .chatGPT ? available : available.sorted { $0.label < $1.label }
             if model.isEmpty { model = modelInfo.first?.id ?? "" }
@@ -307,7 +322,7 @@ public final class ChatModel {
             error = "Choose a provider and model first."
             return
         }
-        do { provider = try Self.makeProvider(profile, reasoning: reasoning) }
+        do { provider = try providerFactory(profile, reasoning) }
         catch { self.error = error.localizedDescription; return }
         guard let provider = provider else { return }
         let text = draft
@@ -343,12 +358,22 @@ public final class ChatModel {
             }
             let mcpTools = await ensureMCPTools()
             let toolMap = mcpToolMap
+            // Fold the older turns into a summary before the window fills, so a long
+            // session continues instead of failing with a context-length error.
+            if let covered = nextCompaction(model: requestedModel) {
+                isCompacting = true
+                if let summary = await compact(provider: provider, model: requestedModel, covered: covered) {
+                    compaction = ConversationCompaction(summary: summary, covered: covered)
+                }
+                isCompacting = false
+            }
             // The prompt describes exactly the tools this run advertises, including
             // MCP tools, so guidance and definitions can never disagree.
             let enabledToolNames = ToolRegistry.definitions(approvalIsEnabled: true).map(\.name) + mcpTools.map(\.name)
             let systemMessage = await systemMessage(attachments: attachments, tools: enabledToolNames,
                                                     agentPrompt: systemPrompt, modelID: requestedModel)
-            let requestMessages = [Message(role: .system, text: systemMessage)] + messages
+            let requestMessages = [Message(role: .system, text: systemMessage)] + contextMessages()
+            contextTokens = ContextWindow.estimate(requestMessages)
             // Aggregated over every provider request in this turn; tool execution time is excluded.
             var streamedOutputTokens = 0
             var streamedSeconds = 0.0
@@ -373,6 +398,8 @@ public final class ChatModel {
                         let total = TokenUsage(inputTokens: (usage?.inputTokens ?? 0) + value.inputTokens,
                                                outputTokens: (usage?.outputTokens ?? 0) + value.outputTokens)
                         usage = total
+                        // The newest request's own size is the truest measure of what is being sent.
+                        contextTokens = value.inputTokens + value.outputTokens
                         streamedOutputTokens += value.outputTokens
                         streamedSeconds += seconds
                         tokensPerSecond = TokenRate.tokensPerSecond(outputTokens: streamedOutputTokens, seconds: streamedSeconds)
@@ -408,6 +435,43 @@ public final class ChatModel {
         if let approvalGate { Task { await approvalGate.cancel() } }
         if let provider { Task { await provider.cancel() } }
         if let workspace { Task { await workspace.stopCommands() } }
+    }
+
+    /// What the provider sees: turns already covered by a summary collapse into one
+    /// system note. The full history stays on screen and in storage.
+    func contextMessages() -> [Message] {
+        guard let compaction, compaction.covered > 0, compaction.covered <= messages.count else { return messages }
+        return [Message(role: .system, text: compaction.note)] + messages.dropFirst(compaction.covered)
+    }
+
+    /// Leading full-history messages to fold into the summary for the next request,
+    /// or nil while the request being sent still fits the model's window.
+    func nextCompaction(model: String) -> Int? {
+        guard !ContextWindow.fits(contextMessages(), model: model) else { return nil }
+        let start = min(compaction?.covered ?? 0, messages.count)
+        guard let cut = ContextWindow.coverage(of: Array(messages[start...])) else { return nil }
+        return start + cut
+    }
+
+    /// One tool-free provider call that turns the not-yet-summarized prefix into a
+    /// standing note. A failure keeps the full history, exactly as before.
+    private func compact(provider: any LLMProvider, model: String, covered: Int) async -> String? {
+        let prior = min(compaction?.covered ?? 0, covered)
+        var request = [Message(role: .system, text: ContextWindow.summaryInstruction)]
+        if let compaction { request.append(Message(role: .user, text: "Earlier summary:\n\(compaction.summary)")) }
+        request.append(contentsOf: messages[prior..<covered])
+        request.append(Message(role: .user, text: ContextWindow.summaryRequest))
+        var summary = ""
+        do {
+            // shortcut: this call's cost is not billed into the footer estimate.
+            for try await event in provider.stream(messages: request, model: model, tools: []) {
+                try Task.checkCancellation()
+                if case .text(let text) = event { summary += text }
+            }
+            try Task.checkCancellation()
+        } catch { return nil }
+        let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     public func decideEdit(approved: Bool) {
@@ -474,6 +538,8 @@ public final class ChatModel {
         usage = conversation.usage
         tokensPerSecond = nil
         estimatedCost = conversation.estimatedCost
+        compaction = conversation.compaction
+        contextTokens = ContextWindow.estimate(contextMessages())
         workspaceRevision += 1
     }
 
@@ -483,6 +549,7 @@ public final class ChatModel {
         self.workspace = workspace
         currentConversationID = UUID()
         messages = []; usage = nil; tokensPerSecond = nil; estimatedCost = nil; error = nil
+        compaction = nil; contextTokens = 0
         draft = ""; commands = []; attachedImages = []
         if previousWorkspace !== workspace { changes = [] }
         conversationProfileID = nil
@@ -507,6 +574,7 @@ public final class ChatModel {
         conversation.changes = changes
         conversation.usage = usage
         conversation.estimatedCost = estimatedCost
+        conversation.compaction = compaction
         conversation.savedAt = Date()
         if let index = conversations.firstIndex(where: { $0.id == currentConversationID }) {
             conversations[index] = conversation

@@ -134,6 +134,17 @@ struct Composer: View {
                 Text("⌘ Return to send · Esc to stop").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            if chat.isCompacting {
+                Text("Summarizing older turns…").font(.caption).foregroundStyle(.secondary)
+            } else if chat.contextTokens > 0 {
+                let used = chat.contextTokens.formatted(.number.notation(.compactName))
+                let limit = chat.contextLimit.formatted(.number.notation(.compactName))
+                Text("Context ≈ \(used) / \(limit)\(chat.isContextCompacted ? " · summarized" : "")")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .help(chat.isContextCompacted
+                        ? "Older turns are replaced by a summary for the model; the transcript keeps them."
+                        : "Estimated size of the next request")
+            }
             if let usage = chat.usage {
                 Text("\(usage.inputTokens) in · \(usage.outputTokens) out").font(.caption).foregroundStyle(.secondary)
             }

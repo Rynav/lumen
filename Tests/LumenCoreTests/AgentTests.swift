@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import LumenCore
 
-private final class MockProvider: LLMProvider, @unchecked Sendable {
+final class MockProvider: LLMProvider, @unchecked Sendable {
     private let lock = NSLock()
     private var script: [[StreamEvent]]
     private var requests: [[Message]] = []

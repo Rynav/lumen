@@ -79,6 +79,12 @@ Set **Reasoning** near the composer or in **Settings → Agent**. **Default** om
 
 The chat shows a collapsed **Reasoning** section when the provider exposes reasoning. For known summary-capable Responses models (GPT-5/6, o3/o4 and Codex), Lumen requests `reasoning.summary: auto` and streams the public summary. Compatible endpoints can supply `reasoning_content` or `reasoning` text. Expand the section to read it; the answer remains separate. Some models/accounts provide no readable summary. OpenAI's private internal reasoning and encrypted continuation data are not displayed, decrypted, or invented.
 
+## Long conversations
+
+The composer footer shows the estimated request size against the selected model's context window. When a request would pass about three quarters of that window, Lumen asks the same provider to summarize the older half of the conversation and sends that summary in place of those turns. No tools are offered to the summarizer, and a failed summary falls back to the full history.
+
+The transcript and the saved conversation keep every message; only the request is compacted. Each conversation's summary and the number of turns it covers are stored with it, so a relaunch neither re-summarizes nor re-sends what was already compressed. Window sizes come from a built-in table — Codex/GPT-5/6 272,000 tokens, GPT-4.1 and Gemini 1,048,576, Claude and o3/o4 200,000, anything else 128,000 — so an unknown local model compacts early rather than overflowing. Stop cancels a summary in progress like any other request.
+
 ## Contributing
 
 Run `swift test` before opening a pull request; CI runs the same tests plus a full app build on macOS. Keep `LumenCore` free of UI code and provider credentials out of anything but Keychain.
