@@ -55,6 +55,25 @@ public struct KeychainStore: Sendable {
         try delete(account: account(profileID, "headers"))
     }
 
+    public func loadChatGPTAccounts() throws -> [UUID: ChatGPTAccount] {
+        guard let data = try read(account: "chatGPT.accounts") else { return [:] }
+        guard let accounts = try? JSONDecoder().decode([UUID: ChatGPTAccount].self, from: data) else {
+            throw StoreError.invalidData
+        }
+        return accounts
+    }
+
+    func saveChatGPTAccounts(_ accounts: [UUID: ChatGPTAccount]) throws {
+        try save(JSONEncoder().encode(accounts), account: "chatGPT.accounts")
+    }
+
+    func chatGPTHostID() throws -> String {
+        if let data = try read(account: "chatGPT.hostID"), let id = String(data: data, encoding: .utf8) { return id }
+        let id = "urn:uuid:\(UUID().uuidString.lowercased())"
+        try save(Data(id.utf8), account: "chatGPT.hostID")
+        return id
+    }
+
     private func account(_ id: UUID, _ field: String) -> String {
         "\(id.uuidString).\(field)"
     }

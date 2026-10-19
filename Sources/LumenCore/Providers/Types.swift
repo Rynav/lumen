@@ -1,5 +1,10 @@
 import Foundation
 
+public enum ReasoningEffort: String, Codable, CaseIterable, Sendable {
+    case automatic, none, minimal, low, medium, high, xhigh
+    public var title: String { self == .automatic ? "Default" : self == .xhigh ? "Extra high" : rawValue.capitalized }
+}
+
 public enum JSONValue: Codable, Equatable, Sendable {
     case string(String), number(Double), bool(Bool), object([String: JSONValue]), array([JSONValue]), null
 
@@ -48,12 +53,34 @@ public struct ToolResult: Codable, Equatable, Sendable {
     public init(callID: String, content: String, isError: Bool = false) {
         self.callID = callID; self.content = content; self.isError = isError
     }
+    /// Returned when a tool call arrives on the final permitted request, where no
+    /// tools are advertised.
+    public static let toolsDisabled = "Tools are disabled: this task reached its maximum number of steps. Nothing was run. Reply with text only; the user must send a new message to continue."
 }
 
 public enum ContentPart: Codable, Equatable, Sendable {
     case text(String)
+    case reasoningSummary(id: String, text: String)
     case toolCall(ToolCall)
     case toolResult(ToolResult)
+    case providerItem(JSONValue)
+    case image(ImageAttachment)
+}
+
+/// An inline image sent to the model. `data` is the raw encoded bytes (typically
+/// PNG) carried across providers and persisted with the conversation; `mediaType`
+/// is an IANA type such as `image/png` used to build data URLs and provider blocks.
+public struct ImageAttachment: Codable, Equatable, Sendable {
+    public var mediaType: String
+    public var data: Data
+    public init(mediaType: String, data: Data) {
+        self.mediaType = mediaType
+        self.data = data
+    }
+    /// The `data:<mediaType>;base64,<payload>` URL both OpenAI and the Responses API accept.
+    public var dataURL: String {
+        "data:\(mediaType);base64,\(data.base64EncodedString())"
+    }
 }
 
 public struct Message: Codable, Equatable, Sendable, Identifiable {
@@ -68,6 +95,22 @@ public struct Message: Codable, Equatable, Sendable, Identifiable {
     public var text: String {
         parts.compactMap { if case .text(let value) = $0 { return value }; return nil }.joined()
     }
+    public var reasoningSummary: String {
+        parts.compactMap { part -> String? in
+            guard case .reasoningSummary(_, let text) = part, !text.isEmpty else { return nil }
+            return text
+        }.joined(separator: "\n\n")
+    }
+    public var images: [ImageAttachment] {
+        parts.compactMap { if case .image(let image) = $0 { return image }; return nil }
+    }
+    public var hasReasoning: Bool {
+        parts.contains {
+            if case .reasoningSummary = $0 { return true }
+            if case .providerItem(let item) = $0 { return item["type"]?.string == "reasoning" }
+            return false
+        }
+    }
 }
 
 public struct TokenUsage: Codable, Equatable, Sendable {
@@ -77,14 +120,34 @@ public struct TokenUsage: Codable, Equatable, Sendable {
         self.inputTokens = inputTokens; self.outputTokens = outputTokens
     }
     public func estimatedCost(inputPerMillion: Double?, outputPerMillion: Double?) -> Double? {
-        guard let inputPerMillion, let outputPerMillion else { return nil }
+        guard let inputPerMillion, let outputPerMillion,
+              inputPerMillion.isFinite, outputPerMillion.isFinite,
+              inputPerMillion >= 0, outputPerMillion >= 0,
+              inputTokens >= 0, outputTokens >= 0 else { return nil }
         return (Double(inputTokens) * inputPerMillion + Double(outputTokens) * outputPerMillion) / 1_000_000
+    }
+}
+
+/// Streaming throughput of one response, shown beside the token counts in the composer.
+public enum TokenRate {
+    /// Output tokens per second, or nil when there is nothing meaningful to report:
+    /// no generated tokens, no elapsed time, or a non-finite duration.
+    public static func tokensPerSecond(outputTokens: Int, seconds: Double) -> Double? {
+        guard outputTokens > 0, seconds.isFinite, seconds > 0 else { return nil }
+        return Double(outputTokens) / seconds
+    }
+
+    /// Converts a monotonic clock duration into seconds for the rate above.
+    public static func seconds(_ duration: Duration) -> Double {
+        Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
     }
 }
 
 public enum StreamEvent: Sendable, Equatable {
     case text(String)
+    case reasoningSummary(id: String, text: String)
     case toolCall(ToolCall)
+    case providerItem(JSONValue)
     case usage(TokenUsage)
     case finished
 }

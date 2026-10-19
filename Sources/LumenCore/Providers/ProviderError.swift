@@ -13,7 +13,7 @@ public enum ProviderError: LocalizedError, Sendable, Equatable {
     public var errorDescription: String? {
         switch self {
         case .invalidURL: "Enter a valid HTTP(S) API base URL without embedded credentials or query parameters."
-        case .unauthorized: "The provider rejected your credentials. Check the API key in Settings."
+        case .unauthorized: "The provider rejected your credentials. Sign in again or check the API key in Settings."
         case .rateLimited: "The provider is rate limiting requests. Wait a moment and try again."
         case .contextLength: "This conversation exceeds the model's context limit. Start a new conversation or choose a larger-context model."
         case .http(let status): "The provider returned HTTP \(status). Check the endpoint and model."

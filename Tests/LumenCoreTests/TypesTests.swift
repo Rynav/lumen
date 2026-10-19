@@ -15,3 +15,18 @@ import Testing
     #expect(value["count"]?.number == 2)
     #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value)) == value)
 }
+
+@Test func tokenRateNeedsTokensAndElapsedTime() {
+    #expect(TokenRate.tokensPerSecond(outputTokens: 100, seconds: 4) == 25)
+    #expect(TokenRate.tokensPerSecond(outputTokens: 0, seconds: 4) == nil)
+    #expect(TokenRate.tokensPerSecond(outputTokens: 100, seconds: 0) == nil)
+    #expect(TokenRate.tokensPerSecond(outputTokens: 100, seconds: .infinity) == nil)
+}
+
+@Test func costRequiresBothPrices() {
+    let usage = TokenUsage(inputTokens: 1_000_000, outputTokens: 500_000)
+    #expect(usage.estimatedCost(inputPerMillion: 2, outputPerMillion: 8) == 6)
+    #expect(usage.estimatedCost(inputPerMillion: nil, outputPerMillion: 8) == nil)
+    #expect(usage.estimatedCost(inputPerMillion: -1, outputPerMillion: 8) == nil)
+    #expect(usage.estimatedCost(inputPerMillion: .infinity, outputPerMillion: 8) == nil)
+}

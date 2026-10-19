@@ -2,7 +2,10 @@ import Foundation
 
 public enum ProviderKind: String, Codable, CaseIterable, Sendable {
     case openAI
+    case chatGPT
     case anthropic
+    case openRouter
+    case openCode
     case compatible
 }
 
