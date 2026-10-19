@@ -52,6 +52,9 @@ struct RootView: View {
         .onChange(of: chat.pendingEdit?.id) { _, id in
             if id != nil { inspectorTab = .changes; showingInspector = true }
         }
+        .onChange(of: chat.pendingEditBatch?.id) { _, id in
+            if id != nil { inspectorTab = .changes; showingInspector = true }
+        }
         .onChange(of: chat.pendingCommand?.id) { _, id in
             if id != nil { inspectorTab = .activity; showingInspector = true }
         }
@@ -132,7 +135,7 @@ struct RootView: View {
         ToolbarItem {
             if chat.isAwaitingApproval {
                 Button("Review", systemImage: "hand.raised.fill") {
-                    inspectorTab = chat.pendingEdit != nil ? .changes : .activity
+                    inspectorTab = chat.pendingEdit != nil || chat.pendingEditBatch != nil ? .changes : .activity
                     showingInspector = true
                 }
                 .help("Review the proposed action")

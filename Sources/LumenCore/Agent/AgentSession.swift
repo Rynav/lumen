@@ -6,6 +6,7 @@ public enum AgentEvent: Sendable {
     /// so callers can report output tokens per second.
     case usage(TokenUsage, seconds: Double)
     case approval(FileEditProposal)
+    case editBatch(EditBatchProposal)
     case applied(AppliedChange)
     case commandApproval(CommandProposal)
     case command(CommandUpdate)
@@ -129,7 +130,9 @@ public actor AgentSession {
                     result = extra
                 } else if let registry {
                     result = try await registry.execute(call, approval: approval,
-                        onProposal: { output.yield(.approval($0)) }, onApplied: { output.yield(.applied($0)) },
+                        onProposal: { output.yield(.approval($0)) },
+                        onBatchProposal: { output.yield(.editBatch($0)) },
+                        onApplied: { output.yield(.applied($0)) },
                         onCommandProposal: { output.yield(.commandApproval($0)) }, onCommandUpdate: { output.yield(.command($0)) })
                 }
                 else { result = ToolResult(callID: call.id, content: "Open a project folder to use tools.", isError: true) }

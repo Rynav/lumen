@@ -2,11 +2,14 @@
 
 Working notes for what comes after v1. Ordering is by what hurts a real session first, not by size.
 
+## Done
+
+- **Patch-style multi-file edits.** `apply_patch` reviews one `*** Begin Patch` block as a single approval card, with per-file apply/reject and the existing recovery-snapshot and Undo path.
+
 ## Next
 
-1. **Patch-style, multi-file edits.** `edit_file` replaces one exact unique block, so repeated similar code fails and a four-file change means four approval cards. Add an `apply_patch` tool or batch edits under one review card with per-file reject, reusing the existing recovery-snapshot and Undo path.
-2. **Durable changes.** Per-conversation change lists and Undo are session-only; persist them so quitting the app does not lose recovery. Add conversation search and rename.
-3. **Open in external editor / Reveal in Finder** from the file tree. Cheapest quality-of-life win in the app.
+1. **Durable changes.** Per-conversation change lists and Undo are session-only; persist them so quitting the app does not lose recovery. Add conversation search and rename.
+2. **Open in external editor / Reveal in Finder** from the file tree. Cheapest quality-of-life win in the app.
 
 ## Workflow
 

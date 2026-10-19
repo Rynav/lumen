@@ -143,7 +143,14 @@ private struct ChangesSection: View {
 
     var body: some View {
         Group {
-            if let proposal = chat.pendingEdit {
+            if let batch = chat.pendingEditBatch {
+                ScrollView {
+                    EditBatchApprovalView(batch: batch, approved: $chat.pendingEditSelection,
+                                          decide: { chat.decideEditBatch(approvedIDs: $0) })
+                        .id(batch.id)
+                        .padding(LumenStyle.space4)
+                }
+            } else if let proposal = chat.pendingEdit {
                 ScrollView {
                     EditApprovalView(proposal: proposal, decide: { chat.decideEdit(approved: $0) })
                         .id(proposal.id)

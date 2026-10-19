@@ -4,6 +4,7 @@ import Foundation
 public enum WorkspaceError: LocalizedError, Equatable {
     case invalidRoot, outsideWorkspace, unreadable, notText, tooLarge, invalidArguments
     case conflict, ambiguousEdit, protectedPath, unknownProposal, writeFailed
+    case patch(String)
 
     public var errorDescription: String? {
         switch self {
@@ -18,6 +19,7 @@ public enum WorkspaceError: LocalizedError, Equatable {
         case .protectedPath: "Git internals and Lumen recovery files cannot be edited by the agent."
         case .unknownProposal: "This action is no longer pending."
         case .writeFailed: "The file could not be safely written. A recovery snapshot was kept if one was created."
+        case .patch(let message): message
         }
     }
 }
@@ -253,8 +255,11 @@ public actor WorkspaceService {
     private func editTarget(_ path: String) throws -> (path: String, name: String, descriptor: Int32, info: stat) {
         let url = try resolve(path)
         let relativePath = relative(url)
-        guard !relativePath.isEmpty,
-              !relativePath.split(separator: "/").contains(where: { [".git", ".lumen"].contains(String($0)) }) else {
+        let protected = relativePath.split(separator: "/").contains {
+            let name = $0.lowercased()
+            return name == ".git" || name == ".lumen"
+        }
+        guard !relativePath.isEmpty, !protected else {
             throw WorkspaceError.protectedPath
         }
         let parent = url.deletingLastPathComponent()
@@ -282,20 +287,62 @@ public actor WorkspaceService {
     public func prepareEdit(path: String, oldText: String, newText: String) throws -> FileEditProposal {
         try Task.checkCancellation()
         guard !same(oldText, newText), !newText.utf8.contains(0), newText.utf8.count <= 1_048_576 else { throw WorkspaceError.invalidArguments }
+        return try prepareReplacement(path: path) { before in
+            if let before {
+                guard !oldText.isEmpty, let range = before.range(of: oldText, options: .literal),
+                      before.range(of: oldText, options: .literal, range: before.index(after: range.lowerBound)..<before.endIndex) == nil else { throw WorkspaceError.ambiguousEdit }
+                return before.replacingCharacters(in: range, with: newText)
+            }
+            guard oldText.isEmpty else { throw WorkspaceError.ambiguousEdit }
+            return newText
+        }
+    }
+
+    /// Prepares a whole-file replacement for every operation in a patch. All
+    /// files are validated before approval, so a bad hunk changes nothing.
+    func preparePatch(_ patches: [FilePatch]) throws -> [FileEditProposal] {
+        try Task.checkCancellation()
+        guard !patches.isEmpty else { throw WorkspaceError.patch("The patch contains no file changes.") }
+        var proposals: [FileEditProposal] = []
+        var paths: Set<String> = []
+        do {
+            for patch in patches {
+                let proposal = try prepareReplacement(path: patch.path) { before in
+                    try patch.applying(to: before)
+                }
+                guard paths.insert(proposal.path).inserted else {
+                    pending[proposal.id] = nil
+                    throw WorkspaceError.patch("Each file may appear only once in a patch: \(proposal.path).")
+                }
+                proposals.append(proposal)
+            }
+        } catch {
+            for proposal in proposals { pending[proposal.id] = nil }
+            throw error
+        }
+        return proposals
+    }
+
+    private func prepareReplacement(path: String, transform: (String?) throws -> String?) throws -> FileEditProposal {
+        try Task.checkCancellation()
         let target = try editTarget(path)
         defer { Darwin.close(target.descriptor) }
         let before = try existingText(parent: target.descriptor, name: target.name)
-        let after: String
-        if let before {
-            guard !oldText.isEmpty, let range = before.range(of: oldText, options: .literal),
-                  before.range(of: oldText, options: .literal, range: before.index(after: range.lowerBound)..<before.endIndex) == nil else { throw WorkspaceError.ambiguousEdit }
-            after = before.replacingCharacters(in: range, with: newText)
+        let mode: UInt16?
+        if before == nil {
+            mode = nil
         } else {
-            guard oldText.isEmpty else { throw WorkspaceError.ambiguousEdit }
-            after = newText
+            var info = stat()
+            guard fstatat(target.descriptor, target.name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { throw WorkspaceError.unreadable }
+            mode = UInt16(info.st_mode & 0o7777)
         }
-        guard after.utf8.count <= 1_048_576 else { throw WorkspaceError.tooLarge }
-        let proposal = FileEditProposal(id: UUID(), path: target.path, before: before, after: after)
+        let after = try transform(before)
+        guard !same(before, after) else { throw WorkspaceError.invalidArguments }
+        if let after {
+            guard !after.utf8.contains(0) else { throw WorkspaceError.invalidArguments }
+            guard after.utf8.count <= 1_048_576 else { throw WorkspaceError.tooLarge }
+        }
+        let proposal = FileEditProposal(id: UUID(), path: target.path, before: before, after: after, mode: mode)
         pending[proposal.id] = PendingEdit(proposal: proposal, parentDevice: target.info.st_dev, parentInode: target.info.st_ino)
         return proposal
     }
@@ -310,7 +357,7 @@ public actor WorkspaceService {
         guard target.info.st_dev == edit.parentDevice, target.info.st_ino == edit.parentInode,
               same(try existingText(parent: target.descriptor, name: target.name), edit.proposal.before) else { throw WorkspaceError.conflict }
         let backupPath = try snapshot(edit.proposal)
-        try replace(parent: target.descriptor, name: target.name, expected: edit.proposal.before, content: edit.proposal.after)
+        try replace(parent: target.descriptor, name: target.name, expected: edit.proposal.before, content: edit.proposal.after, mode: edit.proposal.mode)
         let change = AppliedChange(proposal: edit.proposal, backupPath: backupPath)
         applied[id] = change
         appliedOrder.append(id)
@@ -327,7 +374,7 @@ public actor WorkspaceService {
         defer { Darwin.close(target.descriptor) }
         guard let parent = appliedParents[id], parent.device == target.info.st_dev, parent.inode == target.info.st_ino,
               same(try existingText(parent: target.descriptor, name: target.name), change.proposal.after) else { throw WorkspaceError.conflict }
-        try replace(parent: target.descriptor, name: target.name, expected: change.proposal.after, content: change.proposal.before)
+        try replace(parent: target.descriptor, name: target.name, expected: change.proposal.after, content: change.proposal.before, mode: change.proposal.mode)
         applied[id]?.undone = true
     }
 
@@ -364,7 +411,7 @@ public actor WorkspaceService {
         }
     }
 
-    private func replace(parent: Int32, name: String, expected: String?, content: String?) throws {
+    private func replace(parent: Int32, name: String, expected: String?, content: String?, mode: UInt16? = nil) throws {
         try Task.checkCancellation()
         guard same(try existingText(parent: parent, name: name), expected) else { throw WorkspaceError.conflict }
         let temporary = ".lumen-edit-" + UUID().uuidString
@@ -376,6 +423,9 @@ public actor WorkspaceService {
             if !keepTemporary { unlinkat(parent, temporary, 0) }
         }
         if let content { try write(Data(content.utf8), descriptor: descriptor) }
+        if expected == nil, let mode {
+            guard fchmod(descriptor, mode_t(mode)) == 0 else { throw WorkspaceError.writeFailed }
+        }
         if expected != nil {
             let source = openat(parent, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
             guard source >= 0 else { throw WorkspaceError.writeFailed }

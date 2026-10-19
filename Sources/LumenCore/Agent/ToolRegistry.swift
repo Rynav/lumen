@@ -17,6 +17,20 @@ public struct ToolRegistry: Sendable {
         definition("edit_file", "Propose one exact text replacement in a UTF-8 file. old_text must match exactly once. For a NEW file use empty old_text; its parent folder must already exist. Always waits for user approval of a visual diff before writing. Rejected edits must not be retried unless the user asks.",
                    properties: ["path": string("File relative to project root"), "old_text": string("Exact, unique existing text; empty only for a new file"),
                                 "new_text": string("Replacement text, or the complete contents of a new file")], required: ["path", "old_text", "new_text"]),
+        definition("apply_patch", """
+        Propose changes to one or more UTF-8 files in a single review. Use this format:
+        *** Begin Patch
+        *** Update File: path/relative/to/project
+        @@
+         unchanged context
+        -old line
+        +new line
+        *** Add File: path/relative/to/project
+        +new line
+        *** Delete File: path/relative/to/project
+        *** End Patch
+        Each update hunk needs exact context that matches once; add surrounding context for repeated code. Add requires a new file and Delete requires an existing one; parent folders must exist. A file may appear only once. Always waits for approval; rejected files must not be retried unless the user asks.
+        """, properties: ["patch": string("Complete patch text in the *** Begin Patch format")], required: ["patch"]),
         definition("run_command", "Propose a non-interactive command and wait for user approval. Use a program NAME and a literal argument array, not a shell expression. Example: executable=swift, arguments=[test]. Run a project shell script with executable=bash, arguments=[scripts/test.sh]. Shell inline code, blocked programs/options, and paths outside the project are rejected. Output is streamed, merged and bounded; background children are terminated when the command finishes. Never retry a rejected command without a new user request.", properties: [
             "executable": string("Program name from the trusted search path; no absolute paths or shell expressions"),
             "arguments": .object(["type": .string("array"), "items": .object(["type": .string("string")])]),
@@ -38,7 +52,7 @@ public struct ToolRegistry: Sendable {
     }
 
     /// Tools that can change the machine, and therefore always need a gate.
-    public static let approvalRequired: Set<String> = ["edit_file", "run_command"]
+    public static let approvalRequired: Set<String> = ["edit_file", "apply_patch", "run_command"]
 
     private static func definition(_ name: String, _ description: String, properties: [String: JSONValue], required: [String] = []) -> ToolDefinition {
         ToolDefinition(name: name, description: description, parameters: .object([
@@ -49,6 +63,7 @@ public struct ToolRegistry: Sendable {
 
     public func execute(_ call: ToolCall, approval: ApprovalGate? = nil,
                         onProposal: @Sendable (FileEditProposal) -> Void = { _ in },
+                        onBatchProposal: @Sendable (EditBatchProposal) -> Void = { _ in },
                         onApplied: @Sendable (AppliedChange) -> Void = { _ in },
                         onCommandProposal: @Sendable (CommandProposal) -> Void = { _ in },
                         onCommandUpdate: @escaping @Sendable (CommandUpdate) -> Void = { _ in }) async throws -> ToolResult {
@@ -121,6 +136,45 @@ public struct ToolRegistry: Sendable {
                     content = "Applied user-approved edit to \(proposal.path). Recovery snapshot: \(change.backupPath)."
                 } catch {
                     await workspace.discardEdit(proposal.id)
+                    throw error
+                }
+            case "apply_patch":
+                guard let approval else { throw ProviderError.unsupported("Editing requires an explicit user approval gate.") }
+                let patchText = try string("patch")
+                guard patchText.utf8.count <= 4_194_304 else { throw WorkspaceError.tooLarge }
+                let proposals = try await workspace.preparePatch(PatchParser.parse(patchText))
+                do {
+                    let approved = await approval.request(EditBatchProposal(edits: proposals), notify: onBatchProposal)
+                    try Task.checkCancellation()
+                    if approved.isEmpty {
+                        for proposal in proposals { await workspace.discardEdit(proposal.id) }
+                        return ToolResult(callID: call.id, content: "The user rejected this patch. No file was changed. Do not retry it without a new user request.", isError: true)
+                    }
+                    var lines: [String] = []
+                    var appliedCount = 0
+                    var failed = false
+                    for proposal in proposals {
+                        guard approved.contains(proposal.id) else {
+                            await workspace.discardEdit(proposal.id)
+                            lines.append("\(proposal.path): not approved; unchanged.")
+                            continue
+                        }
+                        do {
+                            let change = try await workspace.applyEdit(proposal.id)
+                            onApplied(change)
+                            appliedCount += 1
+                            lines.append("\(proposal.path): applied. Recovery snapshot: \(change.backupPath).")
+                        } catch {
+                            await workspace.discardEdit(proposal.id)
+                            failed = true
+                            lines.append("\(proposal.path): failed. \(error.localizedDescription)")
+                        }
+                    }
+                    let heading = appliedCount == 0 ? "No files were applied." : "Applied \(appliedCount) of \(proposals.count) files."
+                    return ToolResult(callID: call.id, content: ([heading] + lines).joined(separator: "\n"),
+                                      isError: appliedCount == 0 || failed)
+                } catch {
+                    for proposal in proposals { await workspace.discardEdit(proposal.id) }
                     throw error
                 }
             default: throw WorkspaceError.invalidArguments

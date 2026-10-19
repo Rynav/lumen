@@ -87,9 +87,13 @@ public final class ChatModel {
     public private(set) var isRunning = false
     public private(set) var isLoadingModels = false
     public var pendingEdit: FileEditProposal?
+    public var pendingEditBatch: EditBatchProposal?
+    /// Which files in `pendingEditBatch` are checked for apply. Shared by the
+    /// transcript and inspector cards so they cannot disagree.
+    public var pendingEditSelection: Set<UUID> = []
     public var pendingCommand: CommandProposal?
     public private(set) var commands: [CommandUpdate] = []
-    public var isAwaitingApproval: Bool { pendingEdit != nil || pendingCommand != nil }
+    public var isAwaitingApproval: Bool { pendingEdit != nil || pendingEditBatch != nil || pendingCommand != nil }
     public private(set) var changes: [AppliedChange] = []
     public private(set) var isGitRepository = false
     public private(set) var gitStatus: [GitFileStatus] = []
@@ -352,7 +356,7 @@ public final class ChatModel {
         runTask = Task {
             defer {
                 messages = AgentSession.completingToolResults(in: messages)
-                pendingEdit = nil; pendingCommand = nil; approvalGate = nil
+                pendingEdit = nil; pendingEditBatch = nil; pendingEditSelection = []; pendingCommand = nil; approvalGate = nil
                 isRunning = false; runTask = nil; self.provider = nil
                 saveConversation()
             }
@@ -406,6 +410,9 @@ public final class ChatModel {
                         estimatedCost = profile.kind != .chatGPT && requestedModel == profile.defaultModel
                             ? total.estimatedCost(inputPerMillion: profile.inputPricePerMillion, outputPerMillion: profile.outputPricePerMillion) : nil
                     case .approval(let proposal): pendingEdit = proposal
+                    case .editBatch(let batch):
+                        pendingEditBatch = batch
+                        pendingEditSelection = Set(batch.edits.map(\.id))
                     case .applied(let change):
                         changes.append(change)
                         workspaceRevision += 1
@@ -431,6 +438,8 @@ public final class ChatModel {
     public func stop() {
         runTask?.cancel()
         pendingEdit = nil
+        pendingEditBatch = nil
+        pendingEditSelection = []
         pendingCommand = nil
         if let approvalGate { Task { await approvalGate.cancel() } }
         if let provider { Task { await provider.cancel() } }
@@ -478,6 +487,14 @@ public final class ChatModel {
         guard let proposal = pendingEdit, let gate = approvalGate else { return }
         pendingEdit = nil
         Task { await gate.decide(id: proposal.id, approved: approved) }
+    }
+
+    public func decideEditBatch(approvedIDs: Set<UUID>) {
+        guard let batch = pendingEditBatch, let gate = approvalGate else { return }
+        let approved = approvedIDs.intersection(Set(batch.edits.map(\.id)))
+        pendingEditBatch = nil
+        pendingEditSelection = []
+        Task { await gate.decideBatch(id: batch.id, approved: approved) }
     }
 
     public func decideCommand(approved: Bool) {

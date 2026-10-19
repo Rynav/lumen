@@ -192,12 +192,12 @@ Lumen is a single-agent, approval-gated macOS app. Its current design:
 | Provider prompts | per-family override/append | none |
 | Agents | build/plan/explore/title/summary | one implicit agent |
 | Max steps | `MAX_STEPS_PROMPT`, tools disabled | throws `AgentError.iterationLimit` |
-| Tools | 13 native + Code Mode + MCP | `list_files`, `read_file`, `search_files`, `edit_file`, `run_command` + MCP |
+| Tools | 13 native + Code Mode + MCP | `list_files`, `read_file`, `search_files`, `edit_file`, `apply_patch`, `run_command` + MCP |
 
 Lumen's tool layer keeps OpenCode's most important safety properties: every path
 is resolved and confined to the workspace (`WorkspaceService`), commands are a
 program name plus an argument array with a denylist and a process group, and
-`edit_file`/`run_command` always pass through `ApprovalGate`.
+`edit_file`/`apply_patch`/`run_command` always pass through `ApprovalGate`.
 
 ---
 
@@ -218,7 +218,8 @@ Adopts `system = [agent prompt or base, instruction baseline]`:
 Tool guidance follows `session/system-prompt.ts`: `SystemPrompt.render(template:
 tools:)` replaces `${LUMEN_TOOL_GUIDANCE}` with lines that apply only to the
 advertised tools. Guidance text is adapted to Lumen's real tools — notably
-`edit_file` has no `replaceAll`, so the guidance does not mention one.
+`edit_file` has no `replaceAll`, so the guidance does not mention one, and
+`apply_patch` advises one grouped review for related multi-file changes.
 
 Provider overrides follow `plugin/optimize.ts`:
 

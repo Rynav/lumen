@@ -91,6 +91,75 @@ struct EditApprovalView: View {
     }
 }
 
+/// A card that asks the user to apply selected files from one patch.
+struct EditBatchApprovalView: View {
+    let batch: EditBatchProposal
+    @Binding var approved: Set<UUID>
+    let decide: (Set<UUID>) -> Void
+    @State private var expanded: Set<UUID> = []
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: LumenStyle.space3) {
+                Text("Nothing is written until you apply. Unchecked files are rejected; applied files keep recovery snapshots.")
+                    .font(.callout).foregroundStyle(.secondary)
+                VStack(spacing: LumenStyle.space2) {
+                    ForEach(batch.edits) { edit in fileRow(edit) }
+                }
+                HStack {
+                    Text("\(approved.count) of \(batch.edits.count) selected")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Reject All") { decide([]) }.keyboardShortcut(.escape, modifiers: [])
+                    Button(applyTitle) { decide(approved) }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(approved.isEmpty)
+                }
+            }
+            .padding(.top, LumenStyle.space1)
+        } label: {
+            Label(batch.edits.count == 1 ? "Review 1 file change" : "Review \(batch.edits.count) file changes",
+                  systemImage: "square.and.pencil")
+        }
+    }
+
+    private var applyTitle: String {
+        approved.count == 1 ? "Apply 1 File" : "Apply \(approved.count) Files"
+    }
+
+    private func fileRow(_ edit: FileEditProposal) -> some View {
+        VStack(alignment: .leading, spacing: LumenStyle.space2) {
+            HStack(spacing: LumenStyle.space2) {
+                Toggle("", isOn: binding(for: edit.id)).labelsHidden().toggleStyle(.checkbox)
+                    .accessibilityLabel("Apply \(edit.path)")
+                Label(edit.path, systemImage: edit.before == nil ? "doc.badge.plus" : edit.after == nil ? "trash" : "doc.text")
+                    .font(.system(.callout, design: .monospaced))
+                    .lineLimit(2).textSelection(.enabled)
+                Text(edit.before == nil ? "New" : edit.after == nil ? "Deleted" : "Modified")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button(expanded.contains(edit.id) ? "Hide diff" : "Show diff") {
+                    if expanded.contains(edit.id) { expanded.remove(edit.id) } else { expanded.insert(edit.id) }
+                }
+                .buttonStyle(.borderless).font(.caption)
+            }
+            if expanded.contains(edit.id) {
+                DiffView(proposal: edit, compact: true)
+            }
+        }
+        .padding(LumenStyle.space2)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: LumenStyle.radiusSmall, style: .continuous))
+    }
+
+    private func binding(for id: UUID) -> Binding<Bool> {
+        Binding(get: { approved.contains(id) }, set: { on in
+            var ids = approved
+            if on { ids.insert(id) } else { ids.remove(id) }
+            approved = ids
+        })
+    }
+}
+
 /// A sheet listing every applied change with the ability to inspect and undo.
 struct ChangesView: View {
     @Bindable var chat: ChatModel

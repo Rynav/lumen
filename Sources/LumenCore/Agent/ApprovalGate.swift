@@ -25,7 +25,11 @@ public enum ApprovalPolicy: String, Codable, CaseIterable, Sendable {
 
 /// Each run owns its gate. Only an explicit user decision, or the chosen policy, authorizes an action.
 public actor ApprovalGate {
-    private var waiting: (id: UUID, continuation: CheckedContinuation<Bool, Never>)?
+    private enum Waiting {
+        case decision(id: UUID, continuation: CheckedContinuation<Bool, Never>)
+        case batch(id: UUID, continuation: CheckedContinuation<Set<UUID>, Never>)
+    }
+    private var waiting: Waiting?
     private var cancelled = false
     private let policy: ApprovalPolicy
     public init(policy: ApprovalPolicy = .reviewEverything) { self.policy = policy }
@@ -36,28 +40,48 @@ public actor ApprovalGate {
         return await request(id: proposal.id) { notify(proposal) }
     }
 
+    /// One decision for several edits. Returns the ids the user accepted.
+    public func request(_ batch: EditBatchProposal, notify: @Sendable (EditBatchProposal) -> Void) async -> Set<UUID> {
+        if policy != .reviewEverything { return Set(batch.edits.map(\.id)) }
+        return await withTaskCancellationHandler {
+            guard !Task.isCancelled, !cancelled, waiting == nil else { return [] }
+            return await withCheckedContinuation { continuation in
+                waiting = .batch(id: batch.id, continuation: continuation)
+                notify(batch)
+            }
+        } onCancel: { Task { await self.cancel() } }
+    }
+
     public func request(id: UUID, notify: @Sendable () -> Void) async -> Bool {
         if policy == .fullAuto { return true }
         return await withTaskCancellationHandler {
             guard !Task.isCancelled, !cancelled, waiting == nil else { return false }
             return await withCheckedContinuation { continuation in
-                waiting = (id, continuation)
+                waiting = .decision(id: id, continuation: continuation)
                 notify()
             }
         } onCancel: { Task { await self.cancel() } }
     }
 
     public func decide(id: UUID, approved: Bool) {
-        guard let pending = waiting, pending.id == id else { return }
+        guard case .decision(let waitingID, let continuation) = waiting, waitingID == id else { return }
         waiting = nil
-        pending.continuation.resume(returning: approved && !cancelled)
+        continuation.resume(returning: approved && !cancelled)
+    }
+
+    public func decideBatch(id: UUID, approved: Set<UUID>) {
+        guard case .batch(let waitingID, let continuation) = waiting, waitingID == id else { return }
+        waiting = nil
+        continuation.resume(returning: cancelled ? [] : approved)
     }
 
     public func cancel() {
         cancelled = true
-        if let waiting {
-            self.waiting = nil
-            waiting.continuation.resume(returning: false)
+        guard let waiting else { return }
+        self.waiting = nil
+        switch waiting {
+        case .decision(_, let continuation): continuation.resume(returning: false)
+        case .batch(_, let continuation): continuation.resume(returning: [])
         }
     }
 }

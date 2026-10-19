@@ -4,9 +4,22 @@ public struct FileEditProposal: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let path: String
     public let before: String?
-    public let after: String
+    public let after: String?
+    /// Permission bits of the original file, kept so undoing a deletion restores them.
+    public var mode: UInt16? = nil
 
-    public var diff: [DiffLine] { DiffLine.compare(before ?? "", after) }
+    public var diff: [DiffLine] { DiffLine.compare(before ?? "", after ?? "") }
+}
+
+/// One approval containing several file edits. The user may apply a subset.
+public struct EditBatchProposal: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let edits: [FileEditProposal]
+
+    public init(id: UUID = UUID(), edits: [FileEditProposal]) {
+        self.id = id
+        self.edits = edits
+    }
 }
 
 public struct AppliedChange: Identifiable, Equatable, Sendable {

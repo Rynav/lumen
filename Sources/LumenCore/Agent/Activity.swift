@@ -31,6 +31,14 @@ public struct AgentAction: Identifiable, Equatable, Sendable {
                     case "read_file": title = "Read file"; target = args?["path"]?.string ?? "Project file"
                     case "search_files": title = "Search code"; target = args?["query"]?.string ?? "Project files"
                     case "edit_file": title = "Update file"; target = args?["path"]?.string ?? "Project file"
+                    case "apply_patch":
+                        let patch = args?["patch"]?.string ?? ""
+                        let count = patch.components(separatedBy: "\n").filter {
+                            let line = $0.trimmingCharacters(in: .whitespaces)
+                            return line.hasPrefix("*** Add File:") || line.hasPrefix("*** Update File:") || line.hasPrefix("*** Delete File:")
+                        }.count
+                        title = "Apply patch"
+                        target = count == 1 ? "1 file" : count > 1 ? "\(count) files" : "Project files"
                     case "run_command": title = "Run command"; target = args?["executable"]?.string ?? "Project command"
                     default:
                         let mcp = call.name.hasPrefix("mcp__") ? call.name.dropFirst(5) : nil

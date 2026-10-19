@@ -163,6 +163,9 @@ public enum SystemPrompt {
         if tools.contains("edit_file") {
             lines.append("- Make minimal, focused edits through edit_file using an exact, unique old_text match. Read current contents before editing. Do not overwrite unrelated user changes or remove files without authorization.")
         }
+        if tools.contains("apply_patch") {
+            lines.append("- Use apply_patch for related changes across several files so they are reviewed together. Keep each hunk's context exact and unique; use edit_file for a single exact replacement.")
+        }
         if tools.contains("run_command") {
             lines.append("- Use run_command with a program name and literal arguments, never shell expressions. Prefer the project's documented build and test commands. Commands are non-interactive, have bounded output and timeouts, and can have side effects beyond a source edit; do not use them to bypass edit approval.")
         }
@@ -173,5 +176,5 @@ public enum SystemPrompt {
     }
 
     private static let readTools: Set<String> = ["list_files", "read_file", "search_files"]
-    private static let approvalTools: Set<String> = ["edit_file", "run_command"]
+    private static let approvalTools: Set<String> = ["edit_file", "apply_patch", "run_command"]
 }

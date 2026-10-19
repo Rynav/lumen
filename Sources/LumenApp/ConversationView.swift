@@ -87,7 +87,11 @@ struct ConversationView: View {
     }
 
     @ViewBuilder private var approvals: some View {
-        if let proposal = chat.pendingEdit {
+        if let batch = chat.pendingEditBatch {
+            EditBatchApprovalView(batch: batch, approved: $chat.pendingEditSelection,
+                                  decide: { chat.decideEditBatch(approvedIDs: $0) })
+                .id(batch.id)
+        } else if let proposal = chat.pendingEdit {
             EditApprovalView(proposal: proposal, decide: { chat.decideEdit(approved: $0) })
                 .id(proposal.id)
         } else if let proposal = chat.pendingCommand {
