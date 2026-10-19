@@ -9,7 +9,7 @@ struct Composer: View {
     @Bindable var chat: ChatModel
     @FocusState.Binding var focused: Bool
     var openInspector: (InspectorTab) -> Void
-    @State private var editingModel = false
+    @State private var showingModels = false
     @State private var imageError: String?
 
     private var placeholder: String {
@@ -126,7 +126,7 @@ struct Composer: View {
     private var footer: some View {
         HStack(spacing: LumenStyle.space3) {
             if let imageError {
-                Text(imageError).font(.caption).foregroundStyle(LumenStyle.danger)
+                NoteView(kind: .error, size: .compact, message: imageError)
             } else if chat.selectedProfile?.kind == .chatGPT {
                 Text("Using ChatGPT plan").font(.caption).foregroundStyle(.secondary)
                 Link("Manage usage", destination: ChatGPTAuthorization.usageURL).font(.caption)
@@ -194,38 +194,29 @@ struct Composer: View {
         .help(chat.selectedProfile?.name ?? "Choose a provider in Settings")
     }
 
+    private var selectedModelName: String {
+        guard !chat.model.isEmpty else { return "Choose Model" }
+        return chat.modelInfo.first { $0.id == chat.model }?.label ?? chat.model
+    }
+
     private var modelMenu: some View {
-        Menu {
-            if chat.models.isEmpty { Text("No models loaded") }
-            ForEach(chat.models, id: \.self) { model in
-                Button { chat.model = model } label: {
-                    if chat.model == model { Label(model, systemImage: "checkmark") }
-                    else { Text(model) }
-                }
+        Button { showingModels = true } label: {
+            HStack(spacing: LumenStyle.space1) {
+                Image(systemName: "cpu")
+                Text(selectedModelName).lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
-            Divider()
-            Button("Enter Model ID…") { editingModel = true }
-            Button(chat.isLoadingModels ? "Refreshing…" : "Refresh Models") { Task { await chat.loadModels() } }
-                .disabled(chat.isLoadingModels || chat.selectedProfile == nil)
-        } label: {
-            Label(chat.model.isEmpty ? "Choose Model" : chat.model, systemImage: "cpu")
         }
-        .menuStyle(.borderlessButton)
+        .buttonStyle(.borderless)
         .fixedSize()
         .accessibilityLabel("Model")
-        .help(chat.model.isEmpty ? "Choose a model or enter its ID" : chat.model)
-        .popover(isPresented: $editingModel) {
-            VStack(alignment: .leading, spacing: LumenStyle.space3) {
-                Text("Model ID").font(.headline)
-                TextField("Enter a model ID", text: $chat.model).textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("Model ID").onSubmit { editingModel = false }
-                HStack {
-                    Spacer()
-                    Button("Done") { editingModel = false }.keyboardShortcut(.defaultAction)
-                }
-            }
-            .padding(LumenStyle.space4)
-            .frame(width: 280)
+        .help(chat.model.isEmpty ? "Choose a model or enter its ID" : "\(selectedModelName) · \(chat.model)")
+        .popover(isPresented: $showingModels, arrowEdge: .bottom) {
+            ModelPicker(models: chat.modelInfo, selected: chat.model, isLoading: chat.isLoadingModels,
+                        select: { chat.model = $0; showingModels = false },
+                        refresh: { await chat.loadModels() })
         }
     }
 

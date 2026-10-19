@@ -11,6 +11,13 @@ public struct SettingsView: View {
     @Binding private var mcpServers: [MCPServerConfig]
     private let testConnection: (@Sendable (ProviderProfile) async -> String)?
     private let stopRequests: @MainActor () -> Void
+    @State private var selection: Pane?
+
+    private enum Pane: Hashable {
+        case provider(UUID)
+        case agent
+        case mcp
+    }
 
     public init(
         profiles: Binding<[ProviderProfile]>,
@@ -33,58 +40,111 @@ public struct SettingsView: View {
     }
 
     public var body: some View {
-        TabView {
-            providersTab
-                .tabItem { Label("Providers", systemImage: "network") }
-            agentTab
-                .tabItem { Label("Agent", systemImage: "slider.horizontal.3") }
+        // One sidebar for every settings pane instead of a tab bar plus a nested
+        // split view. A plain Window hosting this is resizable; contentMinSize
+        // keeps the form usable.
+        NavigationSplitView {
+            sidebar
+        } detail: {
+            detail
         }
-        .frame(width: 640, height: 560)
+        .frame(minWidth: 720, minHeight: 500)
+        .onAppear {
+            if selection == nil { selection = profiles.first.map { Pane.provider($0.id) } ?? .agent }
+        }
+        .onChange(of: profiles.map(\.id)) { _, ids in
+            guard case .provider(let id)? = selection, !ids.contains(id) else { return }
+            selection = ids.first.map(Pane.provider) ?? .agent
+        }
     }
 
-    // MARK: Providers
+    // MARK: Sidebar
 
-    private var providersTab: some View {
-        Form {
-            if profiles.isEmpty {
-                Section {
-                    ContentUnavailableView("Connect your first provider", systemImage: "network",
-                                           description: Text("Add a provider below to start a conversation. Credentials stay in the macOS Keychain."))
-                }
-            }
-            ForEach(profiles) { profile in
-                Section(profile.name) {
-                    ProfileEditor(profile: profileBinding(profile.id), testConnection: testConnection, stopRequests: stopRequests) {
-                        profiles.removeAll { $0.id == profile.id }
+    private var sidebar: some View {
+        List(selection: $selection) {
+            Section("Providers") {
+                ForEach(profiles) { profile in
+                    Label {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(profile.name.isEmpty ? "Untitled" : profile.name)
+                            Text(profile.kind.title)
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    } icon: {
+                        Image(systemName: "network")
                     }
+                    .tag(Pane.provider(profile.id))
                 }
             }
             Section {
-                Menu {
-                    providerMenuButton("ChatGPT Account", name: "ChatGPT", kind: .chatGPT,
-                                       baseURL: "https://api.openai.com/v1", model: "")
-                    providerMenuButton("OpenAI", name: "OpenAI", kind: .openAI,
-                                       baseURL: "https://api.openai.com/v1", model: "gpt-4.1")
-                    providerMenuButton("Anthropic", name: "Anthropic", kind: .anthropic,
-                                       baseURL: "https://api.anthropic.com", model: "claude-sonnet-4-5")
-                    providerMenuButton("OpenRouter", name: "OpenRouter", kind: .openRouter,
-                                       baseURL: "https://openrouter.ai/api/v1", model: "")
-                    providerMenuButton("OpenCode Zen", name: "OpenCode", kind: .openCode,
-                                       baseURL: "https://opencode.ai/zen/v1", model: "")
-                    providerMenuButton("OpenAI-Compatible", name: "Local", kind: .compatible,
-                                       baseURL: "http://localhost:11434/v1", model: "")
-                } label: {
-                    Label("Add Provider", systemImage: "plus")
-                }
+                Label("Agent", systemImage: "slider.horizontal.3")
+                    .tag(Pane.agent)
+                Label("MCP Servers", systemImage: "wrench.and.screwdriver")
+                    .tag(Pane.mcp)
             }
         }
-        .formStyle(.grouped)
+        .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 300)
+        .safeAreaInset(edge: .bottom) { providerSidebarFooter }
     }
 
-    private func providerMenuButton(_ title: String, name: String, kind: ProviderKind, baseURL: String, model: String) -> some View {
-        Button(title) {
-            profiles.append(ProviderProfile(name: name, kind: kind, baseURL: baseURL, defaultModel: model))
+    @ViewBuilder private var detail: some View {
+        switch selection {
+        case .provider(let id)? where profiles.contains(where: { $0.id == id }):
+            ProfileEditor(profile: profileBinding(id), testConnection: testConnection, stopRequests: stopRequests) {
+                removeProfile(id)
+            }
+            .id(id)
+        case .agent?:
+            agentForm
+        case .mcp?:
+            mcpForm
+        default:
+            ContentUnavailableView("Select a setting", systemImage: "gearshape",
+                                   description: Text("Choose a provider, the agent, or MCP servers."))
         }
+    }
+
+    private var providerSidebarFooter: some View {
+        VStack(spacing: 0) {
+            Divider()
+            Menu {
+                addProviderButton("ChatGPT Account", name: "ChatGPT", kind: .chatGPT,
+                                  baseURL: "https://api.openai.com/v1", model: "")
+                addProviderButton("OpenAI", name: "OpenAI", kind: .openAI,
+                                  baseURL: "https://api.openai.com/v1", model: "gpt-4.1")
+                addProviderButton("Anthropic", name: "Anthropic", kind: .anthropic,
+                                  baseURL: "https://api.anthropic.com", model: "claude-sonnet-4-5")
+                addProviderButton("OpenRouter", name: "OpenRouter", kind: .openRouter,
+                                  baseURL: "https://openrouter.ai/api/v1", model: "")
+                addProviderButton("OpenCode Console", name: "OpenCode", kind: .openCodeConsole,
+                                  baseURL: "https://opencode.ai/console", model: "")
+                addProviderButton("OpenCode Zen (legacy)", name: "OpenCode Zen", kind: .openCode,
+                                  baseURL: "https://opencode.ai/zen/v1", model: "")
+                addProviderButton("OpenAI-Compatible", name: "Local", kind: .compatible,
+                                  baseURL: "http://localhost:11434/v1", model: "")
+            } label: {
+                Label("Add Provider", systemImage: "plus")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .padding(.horizontal, LumenStyle.space3)
+            .padding(.vertical, LumenStyle.space2)
+        }
+        .background(.bar)
+    }
+
+    private func addProviderButton(_ title: String, name: String, kind: ProviderKind, baseURL: String, model: String) -> some View {
+        Button(title) {
+            let profile = ProviderProfile(name: name, kind: kind, baseURL: baseURL, defaultModel: model)
+            profiles.append(profile)
+            selection = .provider(profile.id)
+        }
+    }
+
+    private func removeProfile(_ id: UUID) {
+        profiles.removeAll { $0.id == id }
+        if selection == .provider(id) { selection = profiles.first.map { Pane.provider($0.id) } ?? .agent }
     }
 
     /// A binding looked up by identity, so editing or removing a row never reads
@@ -111,9 +171,9 @@ public struct SettingsView: View {
 
     // MARK: Agent
 
-    private var agentTab: some View {
+    private var agentForm: some View {
         Form {
-            Section("System Prompt") {
+            Section {
                 TextEditor(text: $systemPrompt)
                     .font(.body)
                     .frame(minHeight: 160)
@@ -124,29 +184,39 @@ public struct SettingsView: View {
                         .disabled(systemPrompt == AppConfiguration.defaultSystemPrompt)
                     Spacer()
                 }
-                Text("Lumen sends this, then project instructions and environment details, as the first message. Where \(SystemPrompt.placeholder) appears, guidance for the tools available in that turn is inserted automatically. Lumen replaces this prompt with a model-specific one for GPT models, and appends code-comment guidance for Claude models.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("Add an AGENTS.md at your project root (or one in ~/.lumen) to give Lumen persistent project instructions.")
+            } header: {
+                Text("System Prompt")
+            } footer: {
+                Text("Sent first, followed by project instructions and environment details. \(SystemPrompt.placeholder) expands to guidance for the tools available this turn. Add AGENTS.md at the project root (or ~/.lumen) for persistent project instructions.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Behavior") {
+
+            Section {
                 Stepper("Maximum agent turns: \(maxIterations)", value: $maxIterations, in: 1...1_000)
-                Text("A turn can request up to 32 tools. Independent reads can be requested together; edits and commands still need individual approval.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .help("A turn can request up to 32 tools. Independent reads can be batched; edits and commands still need individual approval.")
                 Picker("Model reasoning effort", selection: $reasoning) {
                     ForEach(ReasoningEffort.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
-                Text("Default omits the override. Supported effort values depend on the model and provider; an unsupported choice can reject a request.")
-                    .font(.caption).foregroundStyle(.secondary)
+                .help("Default omits the override. Supported values depend on the model and provider; an unsupported choice can reject a request.")
                 Picker("Approvals", selection: $approvalPolicy) {
                     ForEach(ApprovalPolicy.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
-                Text(approvalPolicy.detail)
-                    .font(.caption).foregroundStyle(.secondary)
+                .help(approvalPolicy.detail)
+            } header: {
+                Text("Behavior")
+            } footer: {
                 Text("Commands run non-interactively and are not OS-sandboxed. A built-in denylist blocks dangerous programs in every mode.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("MCP Servers") {
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: MCP
+
+    private var mcpForm: some View {
+        Form {
+            Section {
                 if mcpServers.isEmpty {
                     Text("No MCP servers configured.")
                         .font(.callout).foregroundStyle(.secondary)
@@ -161,6 +231,7 @@ public struct SettingsView: View {
                 } label: {
                     Label("Add MCP Server", systemImage: "plus")
                 }
+            } footer: {
                 Text("Servers run over stdio with a scrubbed environment. Their tools are offered to the agent and run without a separate approval prompt.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -218,61 +289,72 @@ private struct ProfileEditor: View {
     @State private var showRemovalWarning = false
 
     var body: some View {
-        Group {
-            TextField("Name", text: $profile.name)
-            Picker("Provider", selection: $profile.kind) {
-                Text("ChatGPT Account").tag(ProviderKind.chatGPT)
-                Text("OpenAI").tag(ProviderKind.openAI)
-                Text("Anthropic").tag(ProviderKind.anthropic)
-                Text("OpenRouter").tag(ProviderKind.openRouter)
-                Text("OpenCode").tag(ProviderKind.openCode)
-                Text("OpenAI-Compatible").tag(ProviderKind.compatible)
-            }
-            .disabled(account != nil || signInTask != nil)
-
-            if profile.kind == .chatGPT {
-                chatGPTControls
-            } else {
-                TextField("Base URL", text: $profile.baseURL)
-                TextField("Default Model", text: $profile.defaultModel)
-                TextField("Input USD / million (optional)", value: $profile.inputPricePerMillion, format: .number)
-                TextField("Output USD / million (optional)", value: $profile.outputPricePerMillion, format: .number)
-                SecureField("API Key", text: $apiKey)
-                    .disabled(!credentialsLoaded)
-
-                customHeaders
-                    .disabled(!credentialsLoaded)
-
-                HStack {
-                    Button("Save Credentials") { _ = saveCredentials() }
-                        .disabled(!credentialsLoaded || testing)
-                    if let testConnection {
-                        Button(testing ? "Testing…" : "Test Connection") {
-                            guard saveCredentials() else { return }
-                            testing = true
-                            let snapshot = profile
-                            Task { @MainActor in
-                                status = await testConnection(snapshot)
-                                testing = false
-                            }
-                        }
-                        .disabled(!credentialsLoaded || testing)
-                    }
-                    Spacer()
-                    Button("Remove Provider", role: .destructive) {
-                        do {
-                            try keychain.deleteAPIKey(for: profile.id)
-                            try keychain.deleteHeaders(for: profile.id)
-                            remove()
-                        } catch { status = error.localizedDescription }
-                    }
-                    .disabled(testing)
+        Form {
+            Section {
+                TextField("Name", text: $profile.name)
+                Picker("Provider", selection: $profile.kind) {
+                    Text("ChatGPT Account").tag(ProviderKind.chatGPT)
+                    Text("OpenAI").tag(ProviderKind.openAI)
+                    Text("Anthropic").tag(ProviderKind.anthropic)
+                    Text("OpenRouter").tag(ProviderKind.openRouter)
+                    Text("OpenCode Zen").tag(ProviderKind.openCode)
+                    Text("OpenCode Console").tag(ProviderKind.openCodeConsole)
+                    Text("OpenAI-Compatible").tag(ProviderKind.compatible)
+                }
+                .disabled(account != nil || signInTask != nil)
+            } header: {
+                Text("Identity")
+            } footer: {
+                if account != nil || signInTask != nil {
+                    Text("Sign out to change the provider type.")
                 }
             }
+
+            if profile.kind == .chatGPT {
+                Section("ChatGPT Account") { chatGPTControls }
+            } else {
+                Section("Connection") {
+                    TextField("Base URL", text: $profile.baseURL)
+                    TextField("Default Model", text: $profile.defaultModel)
+                    if profile.kind == .openCodeConsole {
+                        captionRow("Console server. Models and their API families are read from GET /api/v2/config after you save an API key.")
+                    }
+                }
+
+                Section {
+                    SecureField("API Key", text: $apiKey)
+                        .disabled(!credentialsLoaded)
+                    customHeaders
+                        .disabled(!credentialsLoaded)
+                } header: {
+                    Text("Credentials")
+                } footer: {
+                    Text("Keys and custom headers are saved only in the macOS Keychain.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section("Estimated Cost") {
+                    TextField("Input USD / million (optional)", value: $profile.inputPricePerMillion, format: .number)
+                    TextField("Output USD / million (optional)", value: $profile.outputPricePerMillion, format: .number)
+                    captionRow("Prices apply only to this profile's default model and are estimates, not billing statements.")
+                }
+            }
+
             if !status.isEmpty {
-                Text(status).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                Section {
+                    Label(status, systemImage: "info.circle")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
+            if profile.kind != .chatGPT {
+                Section {
+                    actionRow
+                }
             }
         }
+        .formStyle(.grouped)
         .task(id: profile.id) {
             credentialsLoaded = false
             do {
@@ -301,7 +383,6 @@ private struct ProfileEditor: View {
 
     private var customHeaders: some View {
         VStack(alignment: .leading, spacing: LumenStyle.space2) {
-            Text("Custom Headers").font(.caption).foregroundStyle(.secondary)
             ForEach(headers) { header in
                 let binding = headerBinding(header.id)
                 HStack(spacing: LumenStyle.space2) {
@@ -316,10 +397,42 @@ private struct ProfileEditor: View {
                     .accessibilityLabel("Remove header")
                 }
             }
-            Button("Add Header") { headers.append(Header(name: "", value: "")) }
-            Text("Keys and custom headers are saved only in the macOS Keychain.")
-                .font(.caption).foregroundStyle(.secondary)
+            Button("Add Custom Header") { headers.append(Header(name: "", value: "")) }
         }
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: LumenStyle.space3) {
+            Button("Save Credentials") { _ = saveCredentials() }
+                .disabled(!credentialsLoaded || testing)
+            if let testConnection {
+                Button(testing ? "Testing…" : "Test Connection") {
+                    guard saveCredentials() else { return }
+                    testing = true
+                    let snapshot = profile
+                    Task { @MainActor in
+                        status = await testConnection(snapshot)
+                        testing = false
+                    }
+                }
+                .disabled(!credentialsLoaded || testing)
+            }
+            Spacer(minLength: LumenStyle.space2)
+            Button("Remove Provider", role: .destructive) {
+                do {
+                    try keychain.deleteAPIKey(for: profile.id)
+                    try keychain.deleteHeaders(for: profile.id)
+                    remove()
+                } catch { status = error.localizedDescription }
+            }
+            .disabled(testing)
+        }
+    }
+
+    /// A secondary explanation inside a section (SwiftUI has no plain footer slot
+    /// for `Form` sections built with builders).
+    private func captionRow(_ text: String) -> some View {
+        Text(text).font(.caption).foregroundStyle(.secondary)
     }
 
     private func headerBinding(_ id: UUID) -> Binding<Header> {
@@ -434,6 +547,21 @@ private struct ProfileEditor: View {
         } catch {
             status = error.localizedDescription
             return false
+        }
+    }
+}
+
+private extension ProviderKind {
+    /// A short, human-readable label for the provider list.
+    var title: String {
+        switch self {
+        case .openAI: "OpenAI"
+        case .chatGPT: "ChatGPT Account"
+        case .anthropic: "Anthropic"
+        case .openRouter: "OpenRouter"
+        case .openCode: "OpenCode Zen"
+        case .openCodeConsole: "OpenCode Console"
+        case .compatible: "OpenAI-Compatible"
         }
     }
 }

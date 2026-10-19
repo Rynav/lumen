@@ -105,16 +105,9 @@ struct ConversationView: View {
     }
 
     private func errorBar(_ error: String) -> some View {
-        HStack(spacing: LumenStyle.space2) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(LumenStyle.warning)
-            Text(error).font(.callout).textSelection(.enabled)
-            Spacer(minLength: 0)
-            Button { chat.error = nil } label: { Image(systemName: "xmark") }
-                .buttonStyle(.borderless).accessibilityLabel("Dismiss error")
-        }
-        .padding(.horizontal, LumenStyle.space4)
-        .padding(.vertical, LumenStyle.space2)
-        .background(LumenStyle.danger.opacity(0.12))
+        NoteView(message: error) { chat.error = nil }
+            .padding(.horizontal, LumenStyle.space4)
+            .padding(.vertical, LumenStyle.space2)
     }
 }
 

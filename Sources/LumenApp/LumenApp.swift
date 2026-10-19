@@ -4,6 +4,7 @@ import SwiftUI
 
 @main
 struct LumenApp: App {
+    @Environment(\.openWindow) private var openWindow
     @State private var chat = ChatModel()
 
     var body: some Scene {
@@ -21,13 +22,22 @@ struct LumenApp: App {
                     .keyboardShortcut("o")
                     .disabled(chat.isBusy)
             }
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { openWindow(id: "settings") }
+                    .keyboardShortcut(",")
+            }
         }
-        Settings {
+
+        // A plain Window (rather than the Settings scene) is what makes the
+        // window resizable; contentMinSize keeps it from shrinking past the form.
+        Window("Settings", id: "settings") {
             SettingsView(profiles: $chat.profiles, systemPrompt: $chat.systemPrompt,
                           maxIterations: $chat.maxIterations, reasoning: $chat.reasoning,
                           approvalPolicy: $chat.approvalPolicy, mcpServers: $chat.mcpServers,
                           testConnection: ChatModel.testConnection, stopRequests: { chat.stop() })
         }
+        .defaultSize(width: 900, height: 640)
+        .windowResizability(.contentMinSize)
     }
 
     @MainActor private func openProject() {

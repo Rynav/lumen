@@ -129,7 +129,7 @@ struct ChangesView: View {
                         }
                         .padding(.horizontal, LumenStyle.space4)
                         if let error = chat.error {
-                            Text(error).foregroundStyle(LumenStyle.danger).font(.callout)
+                            NoteView(message: error) { chat.error = nil }
                                 .padding(.horizontal, LumenStyle.space4)
                         }
                     }

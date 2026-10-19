@@ -6,6 +6,7 @@ public enum ProviderKind: String, Codable, CaseIterable, Sendable {
     case anthropic
     case openRouter
     case openCode
+    case openCodeConsole
     case compatible
 }
 

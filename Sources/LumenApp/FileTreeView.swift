@@ -59,7 +59,7 @@ private struct FileTreeFolder: View {
                     .buttonStyle(.plain).help(entry.path).accessibilityLabel("Preview \(entry.path)")
                 }
             }
-            if let error { Text(error).font(.caption).foregroundStyle(LumenStyle.danger) }
+            if let error { NoteView(kind: .error, size: .compact, message: error) }
             if truncated { Text("Folder listing limited to 500 entries.").font(.caption).foregroundStyle(.secondary) }
             if !loading, entries.isEmpty, error == nil {
                 Text("Empty folder").font(.caption).foregroundStyle(.secondary)

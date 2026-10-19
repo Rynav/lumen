@@ -63,7 +63,8 @@ struct CommandConsoleView: View {
                 .clipShape(RoundedRectangle(cornerRadius: LumenStyle.radiusSmall, style: .continuous))
                 .padding(.top, LumenStyle.space1)
             if let error = command.error {
-                Text(error).font(.caption).foregroundStyle(LumenStyle.danger).textSelection(.enabled)
+                NoteView(kind: .error, size: .compact, message: error)
+                    .padding(.top, LumenStyle.space1)
             }
             if let result = command.result {
                 Text("\(result.totalBytes) output bytes\(result.truncated ? " · truncated (head/tail)" : "")")

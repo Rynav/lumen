@@ -88,7 +88,7 @@ public final class ChatGPTProvider: LLMProvider, @unchecked Sendable {
         }
     }
 
-    static func requestBody(messages: [Message], model: String, tools: [ToolDefinition], reasoning: ReasoningEffort = .automatic) throws -> Data {
+    static func requestBody(messages: [Message], model: String, tools: [ToolDefinition], reasoning: ReasoningEffort = .automatic, namespacedTools: Bool = true) throws -> Data {
         var input: [JSONValue] = []
         var instructions: [String] = []
         for message in messages {
@@ -103,8 +103,10 @@ public final class ChatGPTProvider: LLMProvider, @unchecked Sendable {
                     images.append(.object(["type": .string("input_image"), "image_url": .string(image.dataURL)]))
                 case .reasoningSummary: break // Display only; replay the original opaque reasoning item instead.
                 case .toolCall(let call):
-                    input.append(.object(["type": .string("function_call"), "call_id": .string(call.id),
-                        "name": .string(call.name), "namespace": .string("workspace"), "arguments": .string(call.arguments)]))
+                    var item: [String: JSONValue] = ["type": .string("function_call"), "call_id": .string(call.id),
+                        "name": .string(call.name), "arguments": .string(call.arguments)]
+                    if namespacedTools { item["namespace"] = .string("workspace") }
+                    input.append(.object(item))
                 case .toolResult(let result):
                     input.append(.object(["type": .string("function_call_output"), "call_id": .string(result.callID), "output": .string(result.content)]))
                 case .providerItem(let item): input.append(item)
@@ -117,22 +119,25 @@ public final class ChatGPTProvider: LLMProvider, @unchecked Sendable {
                 input.append(.object(["role": .string(message.role.rawValue), "content": encodedContent]))
             }
         }
-        var body: [String: JSONValue] = ["model": .string(model), "input": .array(input), "stream": .bool(true),
-            "store": .bool(false), "include": .array([.string("reasoning.encrypted_content")])]
+        // ponytail: known summary-capable families; use catalog capabilities if reliable metadata becomes available.
+        let summarized = ["gpt-5", "gpt-6", "o3", "o4", "codex-"].contains(where: model.lowercased().hasPrefix)
+        var body: [String: JSONValue] = ["model": .string(model), "input": .array(input), "stream": .bool(true), "store": .bool(false)]
+        // Encrypted reasoning comes only from those families, and only they replay it.
+        if namespacedTools || summarized { body["include"] = .array([.string("reasoning.encrypted_content")]) }
         if !instructions.isEmpty { body["instructions"] = .string(instructions.joined(separator: "\n")) }
         var reasoningOptions: [String: JSONValue] = [:]
         if reasoning != .automatic { reasoningOptions["effort"] = .string(reasoning.rawValue) }
-        // ponytail: known summary-capable families; use catalog capabilities if reliable metadata becomes available.
-        if ["gpt-5", "gpt-6", "o3", "o4", "codex-"].contains(where: model.lowercased().hasPrefix) {
-            reasoningOptions["summary"] = .string("auto")
-        }
+        if summarized { reasoningOptions["summary"] = .string("auto") }
         if !reasoningOptions.isEmpty { body["reasoning"] = .object(reasoningOptions) }
         if !tools.isEmpty {
-            body["tools"] = .array([.object(["type": .string("namespace"), "name": .string("workspace"),
-                "description": .string("Project inspection and user-approved edits"), "tools": .array(tools.map {
-                    .object(["type": .string("function"), "name": .string($0.name), "description": .string($0.description),
-                             "parameters": $0.parameters, "strict": .bool(false)])
-                })])])
+            let functions = tools.map {
+                JSONValue.object(["type": .string("function"), "name": .string($0.name), "description": .string($0.description),
+                                  "parameters": $0.parameters, "strict": .bool(false)])
+            }
+            body["tools"] = namespacedTools
+                ? .array([.object(["type": .string("namespace"), "name": .string("workspace"),
+                    "description": .string("Project inspection and user-approved edits"), "tools": .array(functions)])])
+                : .array(functions)
         }
         return try JSONEncoder().encode(JSONValue.object(body))
     }
@@ -214,7 +219,7 @@ public final class ChatGPTProvider: LLMProvider, @unchecked Sendable {
                     throw ProviderError.unsupported("ChatGPT plan usage is unavailable or its limit was reached. Review app access and limits in ChatGPT Settings → Usage.")
                 }
                 if code == "context_length_exceeded" { throw ProviderError.contextLength }
-                throw ProviderError.unsupported("The ChatGPT response failed. Check account access or try again.")
+                throw ProviderError.unsupported("The model response failed. Check provider access or try again.")
             case "response.incomplete": throw ProviderError.incompleteStream
             default: return []
             }

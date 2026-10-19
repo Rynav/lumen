@@ -161,8 +161,30 @@ public struct ToolDefinition: Codable, Equatable, Sendable {
     }
 }
 
+/// What a model picker needs: the id sent to the provider, the provider's own
+/// display name when it publishes one, and whether it costs nothing.
+public struct ModelInfo: Equatable, Sendable, Identifiable {
+    public var id: String
+    public var name: String?
+    public var isFree: Bool
+    public init(id: String, name: String? = nil, isFree: Bool = false) {
+        self.id = id; self.name = name; self.isFree = isFree
+    }
+    public var label: String {
+        if let name, !name.isEmpty { return name }
+        return id
+    }
+}
+
 public protocol LLMProvider: Sendable {
     func stream(messages: [Message], model: String, tools: [ToolDefinition]) -> AsyncThrowingStream<StreamEvent, any Error>
     func listModels() async throws -> [String]
     func cancel() async
+}
+
+public extension LLMProvider {
+    /// Providers with a richer catalog than bare ids override this.
+    func modelInfo() async throws -> [ModelInfo] {
+        try await listModels().map { ModelInfo(id: $0) }
+    }
 }

@@ -99,6 +99,12 @@ final class HTTPTransport: @unchecked Sendable {
 
     /// Only status and recognized error codes escape; response text stays private.
     static func responseError(status: Int, body: Data) -> ProviderError {
+        // The one body-provided classification: free models are refused for every
+        // client that is not OpenCode itself, key or not. The text stays private.
+        if let value = try? JSONDecoder().decode(JSONValue.self, from: body),
+           let error = value["error"], (error["code"]?.string ?? error["type"]?.string) == "FreeTierError" {
+            return .unsupported("Free OpenCode models work only in the OpenCode client. Choose a paid model from this workspace, or add credits at opencode.ai/console.")
+        }
         if status == 401 || status == 403 { return .unauthorized }
         if status == 429 { return .rateLimited }
         if let value = try? JSONDecoder().decode(JSONValue.self, from: body),

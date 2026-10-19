@@ -59,7 +59,7 @@ public final class ChatModel {
     public var approvalPolicy = ApprovalPolicy.reviewEverything { didSet { persistConfiguration() } }
     public var mcpServers: [MCPServerConfig] = [] { didSet { persistConfiguration() } }
     public var messages: [Message] = []
-    public var models: [String] = []
+    public private(set) var modelInfo: [ModelInfo] = []
     public var draft = ""
     /// Project-relative files folded into the next turn's context, then cleared.
     public private(set) var attachments: [String] = []
@@ -198,7 +198,7 @@ public final class ChatModel {
 
     public func selectProfile() {
         model = selectedProfileID.flatMap { configuration.models[$0] } ?? selectedProfile?.defaultModel ?? ""
-        models = []
+        modelInfo = []
         persistConfiguration()
         Task { await loadModels() }
     }
@@ -208,10 +208,10 @@ public final class ChatModel {
         isLoadingModels = true
         defer { isLoadingModels = false }
         do {
-            let available = try await Self.makeProvider(profile).listModels()
+            let available = try await Self.makeProvider(profile).modelInfo()
             guard selectedProfileID == profile.id else { return }
-            models = profile.kind == .chatGPT ? available : available.sorted()
-            if model.isEmpty { model = models.first ?? "" }
+            modelInfo = profile.kind == .chatGPT ? available : available.sorted { $0.label < $1.label }
+            if model.isEmpty { model = modelInfo.first?.id ?? "" }
         } catch { if selectedProfileID == profile.id { self.error = error.localizedDescription } }
     }
 
@@ -527,6 +527,9 @@ public final class ChatModel {
         case .chatGPT: return ChatGPTProvider(profileID: profile.id, reasoning: reasoning)
         case .openAI, .openRouter, .openCode, .compatible:
             return try OpenAIProvider(profile: profile, apiKey: keychain.loadAPIKey(for: profile.id) ?? "", headers: keychain.loadHeaders(for: profile.id), reasoning: reasoning)
+        case .openCodeConsole:
+            return try OpenCodeConsoleProvider(profile: profile, apiKey: keychain.loadAPIKey(for: profile.id) ?? "",
+                                               headers: keychain.loadHeaders(for: profile.id), reasoning: reasoning)
         case .anthropic:
             return try AnthropicProvider(profile: profile, apiKey: keychain.loadAPIKey(for: profile.id) ?? "", headers: keychain.loadHeaders(for: profile.id))
         }
