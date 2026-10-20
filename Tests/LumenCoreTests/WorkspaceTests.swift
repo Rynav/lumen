@@ -45,6 +45,10 @@ import Testing
         await #expect(throws: WorkspaceError.outsideWorkspace) { try await workspace.listFiles(path: outside.deletingLastPathComponent().path) }
         await #expect(throws: WorkspaceError.outsideWorkspace) { try await workspace.search(query: "secret", path: "escapeFolder") }
         #expect(try await workspace.readFile(path: "alias").contains("first"))
+        #expect(try await workspace.url(for: "src/example.swift") == workspace.root.appendingPathComponent("src/example.swift"))
+        #expect(try await workspace.url(for: "alias") == workspace.root.appendingPathComponent("src/example.swift"))
+        await #expect(throws: WorkspaceError.outsideWorkspace) { try await workspace.url(for: "escape") }
+        await #expect(throws: WorkspaceError.outsideWorkspace) { try await workspace.url(for: outside.path) }
         #expect(try await workspace.listFiles() == "binary\nsrc/example.swift")
         await #expect(throws: WorkspaceError.unreadable) { try await workspace.readFile(path: "src") }
         #expect(mkfifo(root.appendingPathComponent("pipe").path, 0o600) == 0)

@@ -169,6 +169,12 @@ public actor WorkspaceService {
         try data.write(to: directory.appendingPathComponent(name), options: .atomic)
     }
 
+    /// Absolute URL for a path the app wants to hand to another program, such as
+    /// Finder or the default editor. Validated exactly like tool access.
+    public func url(for path: String) throws -> URL {
+        try resolve(path)
+    }
+
     private func resolve(_ path: String) throws -> URL {
         guard !path.utf8.contains(0), !path.split(separator: "/").contains("..") else {
             throw WorkspaceError.outsideWorkspace

@@ -1,3 +1,4 @@
+import AppKit
 import LumenCore
 import SwiftUI
 
@@ -57,6 +58,7 @@ private struct FileTreeFolder: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).help(entry.path).accessibilityLabel("Preview \(entry.path)")
+                    .contextMenu { entryActions(entry, workspace: workspace) }
                 }
             }
             if let error { NoteView(kind: .error, size: .compact, message: error) }
@@ -94,6 +96,33 @@ private struct FileTreeBranch: View {
             Label(entry.name, systemImage: expanded ? "folder.fill" : "folder")
                 .font(.callout).lineLimit(1)
                 .padding(.vertical, 3).help(entry.path)
+                .contextMenu { entryActions(entry, workspace: workspace) }
+        }
+    }
+}
+
+/// Open and reveal use the validated workspace path, never a raw string from
+/// the view, so both stay inside the project root.
+@ViewBuilder
+private func entryActions(_ entry: WorkspaceEntry, workspace: WorkspaceService) -> some View {
+    Button(entry.isDirectory ? "Open in Finder" : "Open in Default App",
+           systemImage: entry.isDirectory ? "folder" : "arrow.up.forward.app") {
+        openEntry(entry, in: workspace, reveal: false)
+    }
+    Button("Reveal in Finder", systemImage: "folder") {
+        openEntry(entry, in: workspace, reveal: true)
+    }
+}
+
+private func openEntry(_ entry: WorkspaceEntry, in workspace: WorkspaceService, reveal: Bool) {
+    Task {
+        guard let url = try? await workspace.url(for: entry.path) else { return }
+        await MainActor.run {
+            if reveal {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } else {
+                _ = NSWorkspace.shared.open(url)
+            }
         }
     }
 }

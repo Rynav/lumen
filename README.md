@@ -33,7 +33,7 @@
 | **Agent tools** | list files, read numbered text, search literals, edit, patch many files, run shell commands |
 | **Approvals** | Review everything · Auto-approve edits · Full Auto — plus a denylist that no mode can override |
 | **Visual diffs** | numbered red/green review, per-file selection for multi-file patches, guarded Undo that survives restarts |
-| **Workspace panel** | Activity, Changes, Files and Git tabs, one keystroke away (⌘⌥I) |
+| **Workspace panel** | Activity, Changes, Files and Git tabs, one keystroke away (⌘⌥I); right-click a file to open it in your editor or reveal it in Finder |
 | **Context care** | token gauge, auto-summarizing of old turns, streaming responses with a Stop that really stops |
 | **Extras** | MCP servers, attachments, reasoning summaries, per-response cost estimates, chat search and rename |
 
