@@ -34,7 +34,7 @@ public actor WorkspaceService {
         let parentInode: ino_t
     }
     private var pending: [UUID: PendingEdit] = [:]
-    // ponytail: Undo is session-only; snapshots stay on disk. Reload a ledger if cross-restart Undo is needed.
+    // In-memory ledger reconciles turns cancelled mid-apply; saved chats persist the undoable changes themselves.
     private var applied: [UUID: AppliedChange] = [:]
     private var appliedOrder: [UUID] = []
     private var appliedParents: [UUID: (device: dev_t, inode: ino_t)] = [:]
@@ -368,14 +368,26 @@ public actor WorkspaceService {
     public func appliedChanges() -> [AppliedChange] { appliedOrder.compactMap { applied[$0] } }
 
     public func undoEdit(_ id: UUID) throws {
+        guard let change = applied[id] else { throw WorkspaceError.unknownProposal }
+        try undoEdit(change)
+    }
+
+    /// Undoes a change restored from a saved chat, whose in-memory ledger is gone.
+    /// The content check still refuses if the file no longer holds the applied text.
+    public func undoEdit(_ change: AppliedChange) throws {
         try Task.checkCancellation()
-        guard let change = applied[id], !change.undone else { throw WorkspaceError.unknownProposal }
+        guard !change.undone else { throw WorkspaceError.unknownProposal }
         let target = try editTarget(change.proposal.path)
         defer { Darwin.close(target.descriptor) }
-        guard let parent = appliedParents[id], parent.device == target.info.st_dev, parent.inode == target.info.st_ino,
-              same(try existingText(parent: target.descriptor, name: target.name), change.proposal.after) else { throw WorkspaceError.conflict }
+        if let parent = appliedParents[change.id],
+           parent.device != target.info.st_dev || parent.inode != target.info.st_ino {
+            throw WorkspaceError.conflict
+        }
+        guard same(try existingText(parent: target.descriptor, name: target.name), change.proposal.after) else {
+            throw WorkspaceError.conflict
+        }
         try replace(parent: target.descriptor, name: target.name, expected: change.proposal.after, content: change.proposal.before, mode: change.proposal.mode)
-        applied[id]?.undone = true
+        applied[change.id]?.undone = true
     }
 
     private func snapshot(_ proposal: FileEditProposal) throws -> String {

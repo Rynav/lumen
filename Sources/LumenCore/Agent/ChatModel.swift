@@ -5,7 +5,10 @@ public struct ChatConversation: Identifiable {
     public let id: UUID
     /// Recorded even before a workspace is attached, so restored chats keep their project grouping.
     public fileprivate(set) var projectPath: String?
-    public var title: String {
+    /// A user-chosen name; nil falls back to the automatic first-message title.
+    public fileprivate(set) var customTitle: String?
+    public var title: String { customTitle ?? automaticTitle }
+    private var automaticTitle: String {
         // ponytail: first-message titles need no extra model request; add semantic summaries if users need them.
         let words = (messages.first(where: { $0.role == .user })?.text ?? "").split(whereSeparator: \.isWhitespace)
         guard !words.isEmpty else { return "New chat" }
@@ -23,12 +26,14 @@ public struct ChatConversation: Identifiable {
     fileprivate var compaction: ConversationCompaction?
     fileprivate var savedAt: Date
 
-    fileprivate init(id: UUID, projectPath: String?, workspace: WorkspaceService?, messages: [Message] = [],
+    fileprivate init(id: UUID, projectPath: String?, customTitle: String? = nil,
+                     workspace: WorkspaceService?, messages: [Message] = [],
                      draft: String = "", profileID: UUID? = nil, commands: [CommandUpdate] = [],
                      changes: [AppliedChange] = [], usage: TokenUsage? = nil, estimatedCost: Double? = nil,
                      compaction: ConversationCompaction? = nil, savedAt: Date = Date()) {
         self.id = id
         self.projectPath = projectPath ?? workspace?.root.path
+        self.customTitle = customTitle
         self.workspace = workspace
         self.messages = messages
         self.draft = draft
@@ -42,9 +47,9 @@ public struct ChatConversation: Identifiable {
     }
 
     fileprivate var snapshot: ConversationSnapshot {
-        ConversationSnapshot(id: id, projectPath: projectPath, messages: messages, draft: draft,
-                             profileID: profileID, usage: usage, estimatedCost: estimatedCost,
-                             compaction: compaction, savedAt: savedAt)
+        ConversationSnapshot(id: id, projectPath: projectPath, title: customTitle, messages: messages,
+                             changes: changes, draft: draft, profileID: profileID, usage: usage,
+                             estimatedCost: estimatedCost, compaction: compaction, savedAt: savedAt)
     }
 }
 
@@ -163,8 +168,10 @@ public final class ChatModel {
     private func restoreConversations() {
         let snapshots = conversationStore.load().sorted { $0.savedAt > $1.savedAt }
         conversations = snapshots.map { snapshot in
-            var conversation = ChatConversation(id: snapshot.id, projectPath: snapshot.projectPath, workspace: nil,
+            var conversation = ChatConversation(id: snapshot.id, projectPath: snapshot.projectPath,
+                customTitle: snapshot.title, workspace: nil,
                 messages: snapshot.messages, draft: snapshot.draft, profileID: snapshot.profileID,
+                changes: snapshot.changes,
                 usage: snapshot.usage, estimatedCost: snapshot.estimatedCost,
                 compaction: snapshot.compaction, savedAt: snapshot.savedAt)
             if snapshot.projectPath == workspace?.root.path { conversation.workspace = workspace }
@@ -524,7 +531,7 @@ public final class ChatModel {
         defer { isUndoing = false; saveConversation() }
         error = nil
         do {
-            try await workspace.undoEdit(id)
+            try await workspace.undoEdit(changes[index])
             changes[index].undone = true
             workspaceRevision += 1
             // Existing tool history would otherwise tell the agent that an undone edit is still applied.
@@ -549,6 +556,26 @@ public final class ChatModel {
         load(conversation)
         error = nil
         persistConfiguration()
+    }
+
+    /// Sets a user-chosen chat name. Blank input restores the automatic title.
+    public func renameConversation(_ id: UUID, to title: String) {
+        guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        conversations[index].customTitle = trimmed.isEmpty ? nil : String(trimmed.prefix(120))
+        persistConversations()
+    }
+
+    /// Chats whose name or message text contains the query, for the sidebar search.
+    public func searchConversations(_ query: String) -> [ChatConversation] {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        return conversations.filter { conversation in
+            // The active chat's messages can be newer than its last saved copy.
+            let messages = conversation.id == currentConversationID ? self.messages : conversation.messages
+            return conversation.title.localizedCaseInsensitiveContains(query)
+                || messages.contains { $0.text.localizedCaseInsensitiveContains(query) }
+        }
     }
 
     /// Removes a saved chat. Deleting the active chat switches to another chat in

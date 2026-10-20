@@ -4,13 +4,13 @@ Working notes for what comes after v1. Ordering is by what hurts a real session 
 
 ## Done
 
+- **Durable changes.** Applied change lists and guarded Undo now survive a restart, saved with the chat. Chats can also be searched by name or message text and renamed from the sidebar.
 - **Patch-style multi-file edits.** `apply_patch` reviews one `*** Begin Patch` block as a single approval card, with per-file apply/reject and the existing recovery-snapshot and Undo path.
 - **Ask the user a question.** `ask_user` blocks the run until the user picks one of two suggested answers or types their own, instead of guessing or stalling. No policy auto-answers it; Stop leaves an unanswered tool error.
 
 ## Next
 
-1. **Durable changes.** Per-conversation change lists and Undo are session-only; persist them so quitting the app does not lose recovery. Add conversation search and rename.
-2. **Open in external editor / Reveal in Finder** from the file tree. Cheapest quality-of-life win in the app.
+1. **Open in external editor / Reveal in Finder** from the file tree. Cheapest quality-of-life win in the app.
 
 ## Workflow
 

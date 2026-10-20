@@ -22,7 +22,7 @@ public struct EditBatchProposal: Identifiable, Equatable, Sendable {
     }
 }
 
-public struct AppliedChange: Identifiable, Equatable, Sendable {
+public struct AppliedChange: Codable, Identifiable, Equatable, Sendable {
     public var id: UUID { proposal.id }
     public let proposal: FileEditProposal
     public let backupPath: String

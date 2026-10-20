@@ -11,7 +11,14 @@ struct RootView: View {
     @State private var inspectorTab: InspectorTab = .activity
     @State private var choosingProject = false
     @State private var deleting: SidebarItem?
+    @State private var searchText = ""
+    @State private var renamingID: UUID?
+    @State private var renameText = ""
     @FocusState private var composerFocused: Bool
+
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     private var conversationTitle: String {
         chat.conversations.first { $0.id == chat.currentConversationID }?.title ?? "New chat"
@@ -71,39 +78,51 @@ struct RootView: View {
 
     private var sidebar: some View {
         List(selection: $selection) {
-            Section("Projects") {
-                if chat.projectPaths.isEmpty {
-                    Button { choosingProject = true } label: {
-                        Label("Open a Project…", systemImage: "folder.badge.plus")
-                    }
-                    .disabled(chat.isBusy)
-                } else {
-                    ForEach(chat.projectPaths, id: \.self) { path in
-                        projectRow(path)
+            if isSearching {
+                let results = chat.searchConversations(searchText)
+                Section("Search Results") {
+                    if results.isEmpty {
+                        Text("No matching chats").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(results) { conversationRow($0) }
                     }
                 }
-            }
-
-            let projectChats = chat.workspace == nil
-                ? [] : chat.conversations.filter { $0.projectPath == chat.workspace?.root.path }
-            if !projectChats.isEmpty {
-                Section("Conversations") {
-                    ForEach(projectChats) { conversation in
-                        conversationRow(conversation)
+            } else {
+                Section("Projects") {
+                    if chat.projectPaths.isEmpty {
+                        Button { choosingProject = true } label: {
+                            Label("Open a Project…", systemImage: "folder.badge.plus")
+                        }
+                        .disabled(chat.isBusy)
+                    } else {
+                        ForEach(chat.projectPaths, id: \.self) { path in
+                            projectRow(path)
+                        }
                     }
                 }
-            }
 
-            let standalone = chat.conversations.filter { $0.projectPath == nil }
-            if !standalone.isEmpty {
-                Section("Chats") {
-                    ForEach(standalone) { conversation in
-                        conversationRow(conversation)
+                let projectChats = chat.workspace == nil
+                    ? [] : chat.conversations.filter { $0.projectPath == chat.workspace?.root.path }
+                if !projectChats.isEmpty {
+                    Section("Conversations") {
+                        ForEach(projectChats) { conversation in
+                            conversationRow(conversation)
+                        }
+                    }
+                }
+
+                let standalone = chat.conversations.filter { $0.projectPath == nil }
+                if !standalone.isEmpty {
+                    Section("Chats") {
+                        ForEach(standalone) { conversation in
+                            conversationRow(conversation)
+                        }
                     }
                 }
             }
         }
         .listStyle(.sidebar)
+        .searchable(text: $searchText, placement: .sidebar, prompt: "Search chats")
         .confirmationDialog(deleting.map { title(for: $0) } ?? "", isPresented: Binding(
             get: { deleting != nil }, set: { if !$0 { deleting = nil } }
         ), presenting: deleting) { item in
@@ -121,6 +140,16 @@ struct RootView: View {
                 Text("This removes the project and deletes its saved chats from Lumen. Files on disk are untouched.")
             }
         }
+        .alert("Rename Chat", isPresented: Binding(
+            get: { renamingID != nil }, set: { if !$0 { renamingID = nil } }
+        )) {
+            TextField("Chat name", text: $renameText)
+            Button("Rename") {
+                if let id = renamingID { chat.renameConversation(id, to: renameText) }
+                renamingID = nil
+            }
+            Button("Cancel", role: .cancel) { renamingID = nil }
+        }
     }
 
     private func title(for item: SidebarItem) -> String {
@@ -131,14 +160,33 @@ struct RootView: View {
     }
 
     private func conversationRow(_ conversation: ChatConversation) -> some View {
-        Label(conversation.title, systemImage: "bubble.left")
-            .tag(SidebarItem.conversation(conversation.id))
-            .contextMenu {
-                Button("Delete Chat", role: .destructive) {
-                    deleting = .conversation(conversation.id)
+        Group {
+            if isSearching, let path = conversation.projectPath {
+                Label {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(conversation.title).lineLimit(1)
+                        Text(URL(fileURLWithPath: path).lastPathComponent)
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                } icon: {
+                    Image(systemName: "bubble.left")
                 }
-                .disabled(chat.isBusy)
+            } else {
+                Label(conversation.title, systemImage: "bubble.left")
             }
+        }
+        .tag(SidebarItem.conversation(conversation.id))
+        .contextMenu {
+            Button("Rename Chat…") {
+                renameText = conversation.title
+                renamingID = conversation.id
+            }
+            .disabled(chat.isBusy)
+            Button("Delete Chat", role: .destructive) {
+                deleting = .conversation(conversation.id)
+            }
+            .disabled(chat.isBusy)
+        }
     }
 
     private func projectRow(_ path: String) -> some View {

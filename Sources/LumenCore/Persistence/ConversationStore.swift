@@ -13,11 +13,14 @@ public struct ConversationCompaction: Codable, Equatable, Sendable {
     var note: String { "Summary of earlier conversation (the full history stays visible in the app):\n\(summary)" }
 }
 
-/// Chat content only; commands and applied changes stay tied to the workspace session.
+/// Chat content and its applied-change ledger. Commands stay tied to the workspace session.
 public struct ConversationSnapshot: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
     public var projectPath: String?
+    /// A user-chosen name; nil keeps the automatic first-message title.
+    public var title: String?
     public var messages: [Message]
+    public var changes: [AppliedChange]
     public var draft: String
     public var profileID: UUID?
     public var usage: TokenUsage?
@@ -25,12 +28,34 @@ public struct ConversationSnapshot: Codable, Equatable, Identifiable, Sendable {
     public var compaction: ConversationCompaction?
     public var savedAt: Date
 
-    public init(id: UUID, projectPath: String?, messages: [Message], draft: String,
+    public init(id: UUID, projectPath: String?, title: String? = nil, messages: [Message],
+                changes: [AppliedChange] = [], draft: String,
                 profileID: UUID?, usage: TokenUsage?, estimatedCost: Double?,
                 compaction: ConversationCompaction? = nil, savedAt: Date) {
-        self.id = id; self.projectPath = projectPath; self.messages = messages; self.draft = draft
+        self.id = id; self.projectPath = projectPath; self.title = title; self.messages = messages
+        self.changes = changes; self.draft = draft
         self.profileID = profileID; self.usage = usage; self.estimatedCost = estimatedCost
         self.compaction = compaction; self.savedAt = savedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, projectPath, title, messages, changes, draft, profileID, usage, estimatedCost, compaction, savedAt
+    }
+
+    /// Files written before titles and change ledgers existed still restore.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        projectPath = try container.decodeIfPresent(String.self, forKey: .projectPath)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        messages = try container.decode([Message].self, forKey: .messages)
+        changes = (try? container.decodeIfPresent([AppliedChange].self, forKey: .changes)) ?? []
+        draft = try container.decode(String.self, forKey: .draft)
+        profileID = try container.decodeIfPresent(UUID.self, forKey: .profileID)
+        usage = try container.decodeIfPresent(TokenUsage.self, forKey: .usage)
+        estimatedCost = try container.decodeIfPresent(Double.self, forKey: .estimatedCost)
+        compaction = try container.decodeIfPresent(ConversationCompaction.self, forKey: .compaction)
+        savedAt = try container.decode(Date.self, forKey: .savedAt)
     }
 }
 

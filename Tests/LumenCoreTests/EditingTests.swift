@@ -49,6 +49,27 @@ import Testing
         await #expect(throws: WorkspaceError.ambiguousEdit) { try await workspace.prepareEdit(path: "src/file.txt", oldText: "", newText: "overwrite") }
     }
 
+    @Test func undoWorksAfterRelaunchFromTheSavedProposal() async throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("src/file.txt")
+        let workspace = try WorkspaceService(root: root)
+        let proposal = try await workspace.prepareEdit(path: "src/file.txt", oldText: "old value", newText: "new value")
+        let change = try await workspace.applyEdit(proposal.id)
+        let backup = try JSONDecoder().decode(FileEditProposal.self,
+            from: Data(contentsOf: root.appendingPathComponent(change.backupPath)))
+        let restored = AppliedChange(proposal: backup, backupPath: change.backupPath)
+
+        // The new workspace has no in-memory ledger, but still refuses to overwrite newer work.
+        let reopened = try WorkspaceService(root: root)
+        try Data("edited elsewhere".utf8).write(to: file)
+        await #expect(throws: WorkspaceError.conflict) { try await reopened.undoEdit(restored) }
+        #expect(try String(contentsOf: file, encoding: .utf8) == "edited elsewhere")
+        try Data((proposal.after ?? "").utf8).write(to: file)
+        try await reopened.undoEdit(restored)
+        #expect(try String(contentsOf: file, encoding: .utf8) == proposal.before)
+    }
+
     @Test func staleFileFolderAndUndoAreRejected() async throws {
         let root = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }

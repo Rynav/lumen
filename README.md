@@ -32,10 +32,10 @@
 |---|---|
 | **Agent tools** | list files, read numbered text, search literals, edit, patch many files, run shell commands |
 | **Approvals** | Review everything · Auto-approve edits · Full Auto — plus a denylist that no mode can override |
-| **Visual diffs** | numbered red/green review, per-file selection for multi-file patches, guarded Undo |
+| **Visual diffs** | numbered red/green review, per-file selection for multi-file patches, guarded Undo that survives restarts |
 | **Workspace panel** | Activity, Changes, Files and Git tabs, one keystroke away (⌘⌥I) |
 | **Context care** | token gauge, auto-summarizing of old turns, streaming responses with a Stop that really stops |
-| **Extras** | MCP servers, attachments, reasoning summaries, per-response cost estimates |
+| **Extras** | MCP servers, attachments, reasoning summaries, per-response cost estimates, chat search and rename |
 
 ## Screenshots
 
@@ -95,7 +95,7 @@ Choose **ChatGPT Account → Continue with ChatGPT** and approve in your browser
 
 **Approvals.** *Review everything* (default) asks before each edit and command, *Auto-approve edits* applies file changes immediately, and *Full Auto* also runs commands without prompting. The command denylist blocks dangerous programs and options in every mode, and approval can never override it.
 
-**Edits.** `edit_file` replaces one exact, unique text block; `apply_patch` takes a whole `*** Begin Patch` and shows a single review where you pick which files land. Files are checked and atomically swapped with permissions, ACLs and timestamps preserved, and each one is backed up to `.lumen/backups` before it changes — that's what Undo restores. Add `.lumen/` to your project's `.gitignore` if you don't want snapshots tracked. The agent cannot edit Git internals or `.lumen` itself.
+**Edits.** `edit_file` replaces one exact, unique text block; `apply_patch` takes a whole `*** Begin Patch` and shows a single review where you pick which files land. Files are checked and atomically swapped with permissions, ACLs and timestamps preserved, and each one is backed up to `.lumen/backups` before it changes — that's what Undo restores, even after a restart. Add `.lumen/` to your project's `.gitignore` if you don't want snapshots tracked. The agent cannot edit Git internals or `.lumen` itself.
 
 **Safety.** Every path from the model is resolved (symlinks included) and must stay inside the project root, enforced with descriptor-based access. Reads cap at 1 MB; search stops after 32 MB or 100 matches. Commands run in their own process group with timeouts, truncated output, and a scrubbed environment — the agent never sees your API keys.
 
