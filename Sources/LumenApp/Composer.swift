@@ -25,6 +25,7 @@ struct Composer: View {
         VStack(alignment: .leading, spacing: LumenStyle.space2) {
             if !chat.attachments.isEmpty { attachments }
             if !chat.attachedImages.isEmpty { imageAttachments }
+            if showsCommandPalette { commandPalette }
             input
             footer
         }
@@ -33,6 +34,66 @@ struct Composer: View {
         .padding(.horizontal, LumenStyle.space6)
         .padding(.top, LumenStyle.space2)
         .padding(.bottom, LumenStyle.space4)
+    }
+
+    /// The partial command while the first line is only `/name`, with no space.
+    private var commandQuery: String? {
+        guard !chat.isRunning else { return nil }
+        let firstLine = chat.draft.prefix { !$0.isNewline }
+        guard firstLine.hasPrefix("/") else { return nil }
+        let token = firstLine.dropFirst()
+        guard !token.contains(where: \.isWhitespace) else { return nil }
+        return String(token)
+    }
+
+    private var matchingCommands: [CustomCommand] {
+        guard let query = commandQuery else { return [] }
+        guard !query.isEmpty else { return chat.customCommands }
+        return chat.customCommands.filter { $0.name.localizedCaseInsensitiveContains(query) }
+    }
+
+    private var showsCommandPalette: Bool {
+        guard let query = commandQuery else { return false }
+        return !matchingCommands.isEmpty || query.isEmpty
+    }
+
+    private var commandPalette: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if matchingCommands.isEmpty {
+                    Text("No commands yet. Add Markdown files to ~/.lumen/commands.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(LumenStyle.space3)
+                } else {
+                    ForEach(matchingCommands) { command in
+                        Button { use(command) } label: {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("/\(command.name)").font(.callout.weight(.medium))
+                                if !command.summary.isEmpty {
+                                    Text(command.summary)
+                                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, LumenStyle.space3)
+                            .padding(.vertical, LumenStyle.space2)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("/\(command.name): \(command.summary)")
+                    }
+                }
+            }
+        }
+        .frame(maxHeight: 200)
+        .background(.bar, in: RoundedRectangle(cornerRadius: LumenStyle.radiusMedium, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: LumenStyle.radiusMedium, style: .continuous)
+            .strokeBorder(LumenStyle.separator, lineWidth: 1))
+    }
+
+    private func use(_ command: CustomCommand) {
+        chat.draft = command.text
+        focused = true
     }
 
     private var imageAttachments: some View {
@@ -91,6 +152,10 @@ struct Composer: View {
                 .accessibilityLabel("Message")
                 .padding(LumenStyle.space3)
                 .onPasteCommand(of: [.image, .png, .tiff]) { _ in pasteFromPasteboard() }
+                .onChange(of: chat.draft) { previous, current in
+                    // Pick up files added to the commands folder while the app is open.
+                    if current.hasPrefix("/"), !previous.hasPrefix("/") { chat.refreshCustomCommands() }
+                }
             Divider()
             HStack(spacing: LumenStyle.space3) {
                 Button { openInspector(.files) } label: { Image(systemName: "paperclip") }

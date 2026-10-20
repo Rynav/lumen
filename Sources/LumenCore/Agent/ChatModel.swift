@@ -79,6 +79,8 @@ public final class ChatModel {
     public private(set) var attachments: [String] = []
     /// Images pasted into the composer, sent inline with the next turn, then cleared.
     public private(set) var attachedImages: [ImageAttachment] = []
+    /// Markdown templates from the app's commands folder, offered as slash commands.
+    public private(set) var customCommands: [CustomCommand] = []
     public var error: String?
     public var usage: TokenUsage?
     /// Output tokens per second across the last turn's provider streams; nil until one reports usage.
@@ -171,6 +173,29 @@ public final class ChatModel {
         restoreConversations()
         restoringConfiguration = false
         persistConfiguration()
+        refreshCustomCommands()
+    }
+
+    /// Reloads the app's Markdown slash commands. The composer also calls this
+    /// when a slash is typed, so commands added while the app runs show up.
+    public func refreshCustomCommands() {
+        customCommands = CustomCommands.load(
+            from: instructionsDirectory.appendingPathComponent(CustomCommands.directoryName, isDirectory: true))
+    }
+
+    /// Expands a leading `/name` into that command's template. Text after the
+    /// command name becomes the prompt's arguments. Unknown slashes stay literal.
+    func expandedDraft(_ text: String) -> String {
+        let leading = text.drop(while: { $0.isWhitespace })
+        guard leading.first == "/" else { return text }
+        let rest = leading.dropFirst()
+        let end = rest.firstIndex(where: \.isWhitespace) ?? rest.endIndex
+        let name = String(rest[..<end])
+        guard let command = customCommands.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
+            return text
+        }
+        let arguments = String(rest[end...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return arguments.isEmpty ? command.text : command.text + "\n\n" + arguments
     }
 
     /// Restores saved chats, reattaching the current workspace and the last active conversation.
@@ -381,7 +406,7 @@ public final class ChatModel {
         do { provider = try providerFactory(profile, reasoning) }
         catch { self.error = error.localizedDescription; return }
         guard let provider = provider else { return }
-        let text = draft
+        let text = expandedDraft(draft)
         let images = attachedImages
         if let previous = conversationProfileID, previous != profile.id { newConversation() }
         conversationProfileID = profile.id

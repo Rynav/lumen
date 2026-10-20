@@ -33,8 +33,9 @@
 | **Agent tools** | list files, read numbered text, search literals, edit, patch many files, run shell commands |
 | **Approvals** | Review everything · Auto-approve edits · Full Auto — plus a denylist that no mode can override |
 | **Plan mode** | read-only exploration, a checklist kept in the Plan tab, and one-click Start Building |
+| **Slash commands** | Markdown prompts in `~/.lumen/commands`, with a type-ahead menu and typed-command expansion |
 | **Visual diffs** | numbered red/green review, per-file selection for multi-file patches, guarded Undo that survives restarts |
-| **Workspace panel** | Activity, Changes, Files and Git tabs, one keystroke away (⌘⌥I); right-click a file to open it in your editor or reveal it in Finder |
+| **Workspace panel** | Activity, Plan, Changes, Files and Git tabs, one keystroke away (⌘⌥I); right-click a file to open it in your editor or reveal it in Finder |
 | **Context care** | token gauge, auto-summarizing of old turns, streaming responses with a Stop that really stops |
 | **Extras** | MCP servers, attachments, reasoning summaries, per-response cost estimates, chat search and rename |
 
@@ -97,6 +98,8 @@ Choose **ChatGPT Account → Continue with ChatGPT** and approve in your browser
 **Approvals.** *Review everything* (default) asks before each edit and command, *Auto-approve edits* applies file changes immediately, and *Full Auto* also runs commands without prompting. The command denylist blocks dangerous programs and options in every mode, and approval can never override it.
 
 **Plan mode.** Toggle *Plan* in the composer for a read-only first pass. Lumen can inspect the project and ask questions, but edits and commands are not advertised or accepted. It records the steps with `update_todos`; the Plan tab shows the checklist and a **Start Building** button that leaves plan mode and executes it. The checklist is saved with the chat and stays in later requests even after context compaction.
+
+**Slash commands.** Each Markdown file in `~/.lumen/commands` becomes a composer command named after the file. Typing `/` shows a menu; picking one inserts the file's text. Typing `/name` and sending expands it instead, with any text after the name appended as arguments. For example, `review.md` containing "Review the current changes." turns `/review focus on tests` into that prompt followed by `focus on tests`. These run like any other message, so all approvals still apply.
 
 **Edits.** `edit_file` replaces one exact, unique text block; `apply_patch` takes a whole `*** Begin Patch` and shows a single review where you pick which files land. Files are checked and atomically swapped with permissions, ACLs and timestamps preserved, and each one is backed up to `.lumen/backups` before it changes — that's what Undo restores, even after a restart. Add `.lumen/` to your project's `.gitignore` if you don't want snapshots tracked. The agent cannot edit Git internals or `.lumen` itself.
 
