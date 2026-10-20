@@ -8,6 +8,7 @@ struct DiffView: View {
     var onReady: @MainActor () -> Void = {}
     @State private var rows: [DiffLine] = []
     @State private var changesOnly = false
+    @State private var viewportWidth: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: LumenStyle.space2) {
@@ -22,7 +23,6 @@ struct DiffView: View {
             .font(.system(.caption, design: .monospaced))
 
             HStack {
-                Text("Before / after").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Toggle("Changes only", isOn: $changesOnly).toggleStyle(.switch).controlSize(.mini).font(.caption)
             }
@@ -44,13 +44,19 @@ struct DiffView: View {
                         }
                         .font(.system(size: 12, design: .monospaced))
                         .padding(.vertical, 2).padding(.horizontal, LumenStyle.space2)
-                        .frame(minWidth: compact ? 300 : 700, alignment: .leading)
+                        .frame(minWidth: max(viewportWidth, compact ? 240 : 360), alignment: .leading)
                         .background(row.kind == .added ? LumenStyle.success.opacity(0.14)
                                     : row.kind == .removed ? LumenStyle.danger.opacity(0.14) : .clear)
                         .accessibilityLabel("\(row.kind == .added ? "Added" : row.kind == .removed ? "Removed" : "Unchanged") line: \(row.text)")
                     }
                 }
             }
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: DiffViewportWidthKey.self, value: proxy.size.width)
+                }
+            }
+            .onPreferenceChange(DiffViewportWidthKey.self) { viewportWidth = $0 }
             .background(Color(nsColor: .textBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: LumenStyle.radiusSmall, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: LumenStyle.radiusSmall, style: .continuous).strokeBorder(LumenStyle.separator))
@@ -62,6 +68,13 @@ struct DiffView: View {
             rows = await Task.detached { proposal.diff }.value
             onReady()
         }
+    }
+}
+
+private struct DiffViewportWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

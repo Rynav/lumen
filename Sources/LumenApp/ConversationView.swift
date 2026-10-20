@@ -8,6 +8,11 @@ struct ConversationView: View {
     @FocusState.Binding var composerFocused: Bool
     var chooseProject: () -> Void
     var openInspector: (InspectorTab) -> Void
+    /// Auto-follow pauses when the reader scrolls away from the newest turn, and
+    /// resumes when they return to the bottom or send a new message.
+    @State private var viewportHeight: CGFloat = 0
+    @State private var scrollOffset: CGFloat = 0
+    @State private var followsBottom = true
 
     /// Assistant turns stay visible while they stream, even before text arrives,
     /// so reasoning and tool activity are not hidden behind the first token.
@@ -61,8 +66,41 @@ struct ConversationView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, LumenStyle.space6)
                 .padding(.vertical, LumenStyle.space5)
+                .background {
+                    GeometryReader { geometry in
+                        let frame = geometry.frame(in: .named("transcript"))
+                        Color.clear.preference(key: TranscriptScrollKey.self, value: TranscriptScroll(
+                            offset: frame.minY,
+                            distanceFromBottom: frame.maxY - viewportHeight))
+                    }
+                }
             }
-            .onChange(of: chat.messages) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+            .coordinateSpace(name: "transcript")
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: TranscriptViewportHeightKey.self, value: geometry.size.height)
+                }
+            }
+            .onPreferenceChange(TranscriptViewportHeightKey.self) { viewportHeight = $0 }
+            .onPreferenceChange(TranscriptScrollKey.self) { metrics in
+                let moved = abs(metrics.offset - scrollOffset) > 1
+                scrollOffset = metrics.offset
+                if metrics.distanceFromBottom <= 32 {
+                    followsBottom = true
+                } else if moved {
+                    followsBottom = false
+                }
+            }
+            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+            .onChange(of: chat.currentConversationID) { _, _ in
+                followsBottom = true
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
+            .onChange(of: chat.messages) { old, new in
+                // Sending always reveals the new turn; streaming only follows when the reader is at the bottom.
+                let sent = new.count > old.count && new.last?.role == .user
+                if followsBottom || sent { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
         }
     }
 
@@ -242,4 +280,19 @@ private struct ToolActivityRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Tool activity: \(summary)")
     }
+}
+
+private struct TranscriptViewportHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+private struct TranscriptScroll: Equatable, Sendable {
+    var offset: CGFloat = 0
+    var distanceFromBottom: CGFloat = 0
+}
+
+private struct TranscriptScrollKey: PreferenceKey {
+    static let defaultValue = TranscriptScroll()
+    static func reduce(value: inout TranscriptScroll, nextValue: () -> TranscriptScroll) { value = nextValue() }
 }
