@@ -16,7 +16,10 @@ import Testing
             before: "old", after: "new"), backupPath: ".lumen/backups/note.json")
         let snapshot = ConversationSnapshot(id: UUID(), projectPath: "/tmp/project", title: "Named chat",
             messages: [Message(role: .user, text: "hi")], changes: [change], draft: "draft", profileID: UUID(),
-            usage: TokenUsage(inputTokens: 3, outputTokens: 4), estimatedCost: 0.5, savedAt: Date(timeIntervalSince1970: 10))
+            usage: TokenUsage(inputTokens: 3, outputTokens: 4), estimatedCost: 0.5,
+            planMode: true, todos: [TodoItem(content: "Read the parser", status: .completed),
+                                    TodoItem(content: "Write the fix", status: .inProgress)],
+            savedAt: Date(timeIntervalSince1970: 10))
         try store.save([snapshot])
         #expect(store.load() == [snapshot])
     }
@@ -31,10 +34,14 @@ import Testing
         var json = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode([snapshot])) as? [[String: Any]])
         json[0].removeValue(forKey: "title")
         json[0].removeValue(forKey: "changes")
+        json[0].removeValue(forKey: "planMode")
+        json[0].removeValue(forKey: "todos")
         try JSONSerialization.data(withJSONObject: json).write(to: directory.appendingPathComponent("conversations.json"))
         let loaded = try #require(ConversationStore(directory: directory).load().first)
         #expect(loaded.title == nil)
         #expect(loaded.changes.isEmpty)
+        #expect(loaded.planMode == false)
+        #expect(loaded.todos.isEmpty)
     }
 
     @Test func damagedHistoryFallsBackToEmpty() throws {

@@ -41,6 +41,10 @@ public struct AgentAction: Identifiable, Equatable, Sendable {
                         target = count == 1 ? "1 file" : count > 1 ? "\(count) files" : "Project files"
                     case "run_command": title = "Run command"; target = args?["executable"]?.string ?? "Project command"
                     case "ask_user": title = "Ask you"; target = args?["question"]?.string ?? "Question"
+                    case "update_todos":
+                        let count = args?["todos"]?.array?.count ?? 0
+                        title = "Update checklist"
+                        target = count == 1 ? "1 step" : count > 1 ? "\(count) steps" : "Checklist cleared"
                     default:
                         let mcp = call.name.hasPrefix("mcp__") ? call.name.dropFirst(5) : nil
                         let parts = mcp?.split(separator: "__", maxSplits: 1) ?? []

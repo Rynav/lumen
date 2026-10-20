@@ -66,6 +66,9 @@ struct RootView: View {
         .onChange(of: chat.pendingCommand?.id) { _, id in
             if id != nil { inspectorTab = .activity; showingInspector = true }
         }
+        .onChange(of: chat.isPlanMode) { _, planning in
+            if planning { inspectorTab = .plan; showingInspector = true }
+        }
         .onChange(of: chat.profiles) { _, profiles in
             if !profiles.contains(where: { $0.id == chat.selectedProfileID }) {
                 chat.selectedProfileID = profiles.first?.id

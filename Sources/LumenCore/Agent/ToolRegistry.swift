@@ -2,7 +2,13 @@ import Foundation
 
 public struct ToolRegistry: Sendable {
     public let workspace: WorkspaceService
-    public init(workspace: WorkspaceService) { self.workspace = workspace }
+    /// Planning runs advertise and accept read-only tools only, even if a model
+    /// returns a call it was not offered.
+    public let planMode: Bool
+    public init(workspace: WorkspaceService, planMode: Bool = false) {
+        self.workspace = workspace
+        self.planMode = planMode
+    }
 
     public static let definitions: [ToolDefinition] = [
         definition("list_files", "List project files recursively. Hidden files and build/vendor folders are excluded. Returns at most 500 paths.",
@@ -14,6 +20,20 @@ public struct ToolRegistry: Sendable {
         ], required: ["path"]),
         definition("search_files", "Find literal, case-sensitive text in project files. Returns at most 100 matches with paths and line numbers.",
                    properties: ["query": string("Literal text to find"), "path": string("Folder to search; defaults to .")], required: ["query"]),
+        definition("update_todos", "Replace the task checklist shown to the user. Use it for multi-step work: pass the complete list each time, keep one item in progress, and mark items completed as soon as they are done. An empty list clears it.",
+                   properties: ["todos": .object([
+                       "type": .string("array"), "maxItems": .number(50),
+                       "items": .object([
+                           "type": .string("object"),
+                           "properties": .object([
+                               "content": string("One short, concrete step"),
+                               "status": .object(["type": .string("string"),
+                                                  "enum": .array([.string("pending"), .string("in_progress"), .string("completed")])])
+                           ]),
+                           "required": .array([.string("content"), .string("status")]),
+                           "additionalProperties": .bool(false)
+                       ])
+                   ])], required: ["todos"]),
         definition("edit_file", "Propose one exact text replacement in a UTF-8 file. old_text must match exactly once. For a NEW file use empty old_text; its parent folder must already exist. Always waits for user approval of a visual diff before writing. Rejected edits must not be retried unless the user asks.",
                    properties: ["path": string("File relative to project root"), "old_text": string("Exact, unique existing text; empty only for a new file"),
                                 "new_text": string("Replacement text, or the complete contents of a new file")], required: ["path", "old_text", "new_text"]),
@@ -51,16 +71,22 @@ public struct ToolRegistry: Sendable {
     }
 
     /// The definitions a run advertises. `approval == nil` means no approval gate
-    /// exists, so the tools that always require one are withheld. The prompt's
-    /// tool guidance and the provider request both derive from this, so they can
-    /// never disagree.
-    public static func definitions(approvalIsEnabled: Bool) -> [ToolDefinition] {
-        approvalIsEnabled ? definitions : definitions.filter { !approvalRequired.contains($0.name) }
+    /// exists, so the tools that always require one are withheld. Plan mode keeps
+    /// only read-only tools, so it can inspect and write a checklist but nothing
+    /// else. The prompt's tool guidance and the provider request both derive from
+    /// this, so they can never disagree.
+    public static func definitions(approvalIsEnabled: Bool, planMode: Bool = false) -> [ToolDefinition] {
+        let enabled = approvalIsEnabled ? definitions : definitions.filter { !approvalRequired.contains($0.name) }
+        return planMode ? enabled.filter { planTools.contains($0.name) } : enabled
     }
 
     /// Tools that cannot run without a live user gate: they change the machine,
     /// or they must ask the user directly and wait for the reply.
     public static let approvalRequired: Set<String> = ["edit_file", "apply_patch", "run_command", "ask_user"]
+
+    /// Everything a planning run may call. Asking the user stays available; MCP
+    /// tools do not, because their effects are unknown.
+    public static let planTools: Set<String> = ["list_files", "read_file", "search_files", "update_todos", "ask_user"]
 
     private static func definition(_ name: String, _ description: String, properties: [String: JSONValue], required: [String] = []) -> ToolDefinition {
         ToolDefinition(name: name, description: description, parameters: .object([
@@ -75,8 +101,12 @@ public struct ToolRegistry: Sendable {
                         onApplied: @Sendable (AppliedChange) -> Void = { _ in },
                         onCommandProposal: @Sendable (CommandProposal) -> Void = { _ in },
                         onCommandUpdate: @escaping @Sendable (CommandUpdate) -> Void = { _ in },
-                        onQuestion: @Sendable (UserQuestion) -> Void = { _ in }) async throws -> ToolResult {
+                        onQuestion: @Sendable (UserQuestion) -> Void = { _ in },
+                        onTodos: @Sendable ([TodoItem]) -> Void = { _ in }) async throws -> ToolResult {
         try Task.checkCancellation()
+        guard !planMode || Self.planTools.contains(call.name) else {
+            return ToolResult(callID: call.id, content: "Plan mode is read-only, so this action was not run.", isError: true)
+        }
         do {
             guard let args = try JSONDecoder().decode(JSONValue.self, from: Data(call.arguments.utf8)).object,
                   let definition = Self.definitions.first(where: { $0.name == call.name }),
@@ -106,6 +136,20 @@ public struct ToolRegistry: Sendable {
                 offset: integer("offset", default: 1, range: 1...Int.max),
                 limit: integer("limit", default: 200, range: 1...500))
             case "search_files": content = try await workspace.search(query: string("query"), path: string("path", default: "."))
+            case "update_todos":
+                guard let items = args["todos"]?.array, items.count <= 50 else { throw WorkspaceError.invalidArguments }
+                let todos = try items.map { item -> TodoItem in
+                    guard let object = item.object,
+                          let text = object["content"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !text.isEmpty, text.count <= 500,
+                          let status = object["status"]?.string.flatMap(TodoItem.Status.init(rawValue:)) else {
+                        throw WorkspaceError.invalidArguments
+                    }
+                    return TodoItem(content: text, status: status)
+                }
+                onTodos(todos)
+                let done = todos.filter { $0.status == .completed }.count
+                content = todos.isEmpty ? "Checklist cleared." : "Checklist updated: \(done) of \(todos.count) done."
             case "run_command":
                 guard let approval else { throw ProviderError.unsupported("Commands require an explicit user approval gate.") }
                 let arguments: [String]

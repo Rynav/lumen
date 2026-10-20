@@ -24,13 +24,16 @@ public struct ChatConversation: Identifiable {
     fileprivate var usage: TokenUsage?
     fileprivate var estimatedCost: Double?
     fileprivate var compaction: ConversationCompaction?
+    fileprivate var planMode: Bool
+    fileprivate var todos: [TodoItem]
     fileprivate var savedAt: Date
 
     fileprivate init(id: UUID, projectPath: String?, customTitle: String? = nil,
                      workspace: WorkspaceService?, messages: [Message] = [],
                      draft: String = "", profileID: UUID? = nil, commands: [CommandUpdate] = [],
                      changes: [AppliedChange] = [], usage: TokenUsage? = nil, estimatedCost: Double? = nil,
-                     compaction: ConversationCompaction? = nil, savedAt: Date = Date()) {
+                     compaction: ConversationCompaction? = nil, planMode: Bool = false,
+                     todos: [TodoItem] = [], savedAt: Date = Date()) {
         self.id = id
         self.projectPath = projectPath ?? workspace?.root.path
         self.customTitle = customTitle
@@ -43,13 +46,16 @@ public struct ChatConversation: Identifiable {
         self.usage = usage
         self.estimatedCost = estimatedCost
         self.compaction = compaction
+        self.planMode = planMode
+        self.todos = todos
         self.savedAt = savedAt
     }
 
     fileprivate var snapshot: ConversationSnapshot {
         ConversationSnapshot(id: id, projectPath: projectPath, title: customTitle, messages: messages,
                              changes: changes, draft: draft, profileID: profileID, usage: usage,
-                             estimatedCost: estimatedCost, compaction: compaction, savedAt: savedAt)
+                             estimatedCost: estimatedCost, compaction: compaction, planMode: planMode,
+                             todos: todos, savedAt: savedAt)
     }
 }
 
@@ -85,6 +91,9 @@ public final class ChatModel {
     public var isContextCompacted: Bool { compaction != nil }
     /// True while that summary is being written for the next request.
     public private(set) var isCompacting = false
+    /// Planning is read-only. The mode and its checklist belong to this chat.
+    public private(set) var isPlanMode = false
+    public private(set) var todos: [TodoItem] = []
     public private(set) var workspace: WorkspaceService?
     public private(set) var projectPaths: [String] = []
     public private(set) var conversations: [ChatConversation] = []
@@ -173,7 +182,8 @@ public final class ChatModel {
                 messages: snapshot.messages, draft: snapshot.draft, profileID: snapshot.profileID,
                 changes: snapshot.changes,
                 usage: snapshot.usage, estimatedCost: snapshot.estimatedCost,
-                compaction: snapshot.compaction, savedAt: snapshot.savedAt)
+                compaction: snapshot.compaction, planMode: snapshot.planMode,
+                todos: snapshot.todos, savedAt: snapshot.savedAt)
             if snapshot.projectPath == workspace?.root.path { conversation.workspace = workspace }
             return conversation
         }
@@ -263,8 +273,21 @@ public final class ChatModel {
     /// prompt, the instruction baseline, and the attached files folded in as extra
     /// context. The prompt and model are passed in so a settings change mid-flight
     /// cannot alter a turn that already started.
-    func systemMessage(attachments: [String], tools: [String], agentPrompt: String, modelID: String) async -> String {
+    func systemMessage(attachments: [String], tools: [String], agentPrompt: String, modelID: String,
+                       planMode: Bool = false, todos: [TodoItem] = []) async -> String {
         var context = ""
+        // The standing checklist survives context compaction, so a later build turn
+        // still knows what is left even after its update_todos call is summarized.
+        if !todos.isEmpty {
+            context += "\n\nCurrent checklist:\n" + todos.map { item in
+                let marker: String = switch item.status {
+                case .pending: "[ ]"
+                case .inProgress: "[>]"
+                case .completed: "[x]"
+                }
+                return "\(marker) \(item.content)"
+            }.joined(separator: "\n")
+        }
         if let workspace {
             for path in attachments {
                 if let contents = try? await workspace.readFile(path: path, limit: 500) {
@@ -276,7 +299,7 @@ public final class ChatModel {
         }
         let instructions = await Instructions.load(workspace: workspace, globalDirectory: instructionsDirectory)
         return SystemPrompt.system(agentPrompt: agentPrompt, tools: tools, modelID: modelID,
-                                   instructions: instructions) + context
+                                   instructions: instructions, planMode: planMode) + context
     }
 
     /// Connects enabled MCP servers and maps their tools to namespaced definitions.
@@ -329,6 +352,26 @@ public final class ChatModel {
         } catch { self.error = error.localizedDescription }
     }
 
+    /// Turns read-only planning on or off. The checklist stays with the chat.
+    public func setPlanMode(_ enabled: Bool) {
+        guard !isBusy else { return }
+        let next = enabled && workspace != nil
+        guard next != isPlanMode else { return }
+        isPlanMode = next
+        saveConversation()
+    }
+
+    /// Leaves plan mode and sends the approved plan for execution.
+    public func startBuilding() {
+        guard isPlanMode, !isBusy else { return }
+        let approval = "The plan is approved. Implement it now, working through the checklist and updating each item as you go."
+        let existing = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        isPlanMode = false
+        draft = existing.isEmpty ? approval : existing + "\n\n" + approval
+        saveConversation()
+        send()
+    }
+
     public func send() {
         guard !isBusy, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachedImages.isEmpty else { return }
         guard let profile = selectedProfile, !model.isEmpty else {
@@ -344,6 +387,8 @@ public final class ChatModel {
         conversationProfileID = profile.id
         let requestedModel = model
         let systemPrompt = systemPrompt
+        let planMode = isPlanMode
+        let checklist = todos
         var userParts: [ContentPart] = []
         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { userParts.append(.text(text)) }
         userParts.append(contentsOf: images.map(ContentPart.image))
@@ -370,8 +415,8 @@ public final class ChatModel {
                 isRunning = false; runTask = nil; self.provider = nil
                 saveConversation()
             }
-            let mcpTools = await ensureMCPTools()
-            let toolMap = mcpToolMap
+            let mcpTools = planMode ? [] : await ensureMCPTools()
+            let toolMap = planMode ? [:] : mcpToolMap
             // Fold the older turns into a summary before the window fills, so a long
             // session continues instead of failing with a context-length error.
             if let covered = nextCompaction(model: requestedModel) {
@@ -383,9 +428,11 @@ public final class ChatModel {
             }
             // The prompt describes exactly the tools this run advertises, including
             // MCP tools, so guidance and definitions can never disagree.
-            let enabledToolNames = ToolRegistry.definitions(approvalIsEnabled: true).map(\.name) + mcpTools.map(\.name)
+            let enabledToolNames = ToolRegistry.definitions(approvalIsEnabled: true, planMode: planMode).map(\.name)
+                + mcpTools.map(\.name)
             let systemMessage = await systemMessage(attachments: attachments, tools: enabledToolNames,
-                                                    agentPrompt: systemPrompt, modelID: requestedModel)
+                                                    agentPrompt: systemPrompt, modelID: requestedModel,
+                                                    planMode: planMode, todos: checklist)
             let requestMessages = [Message(role: .system, text: systemMessage)] + contextMessages()
             contextTokens = ContextWindow.estimate(requestMessages)
             // Aggregated over every provider request in this turn; tool execution time is excluded.
@@ -394,7 +441,7 @@ public final class ChatModel {
             do {
                 for try await event in AgentSession().run(messages: requestMessages, model: requestedModel,
                     provider: provider, workspace: workspace, maxIterations: iterations, approval: approval,
-                    extraTools: mcpTools, executeExtraTool: { call in
+                    planMode: planMode, extraTools: mcpTools, executeExtraTool: { call in
                         guard let mapping = toolMap[call.name] else { return nil }
                         do {
                             let arguments = (try? JSONDecoder().decode(JSONValue.self, from: Data(call.arguments.utf8))) ?? .object([:])
@@ -428,6 +475,7 @@ public final class ChatModel {
                         workspaceRevision += 1
                     case .commandApproval(let proposal): pendingCommand = proposal
                     case .question(let question): pendingQuestion = question
+                    case .todos(let items): todos = items
                     case .command(let command):
                         if let index = commands.firstIndex(where: { $0.id == command.id }) { commands[index] = command }
                         else { commands.append(command) }
@@ -625,6 +673,8 @@ public final class ChatModel {
         tokensPerSecond = nil
         estimatedCost = conversation.estimatedCost
         compaction = conversation.compaction
+        isPlanMode = conversation.planMode
+        todos = conversation.todos
         contextTokens = ContextWindow.estimate(contextMessages())
         workspaceRevision += 1
     }
@@ -636,6 +686,7 @@ public final class ChatModel {
         currentConversationID = UUID()
         messages = []; usage = nil; tokensPerSecond = nil; estimatedCost = nil; error = nil
         compaction = nil; contextTokens = 0
+        isPlanMode = false; todos = []
         draft = ""; commands = []; attachedImages = []
         if previousWorkspace !== workspace { changes = [] }
         conversationProfileID = nil
@@ -661,6 +712,8 @@ public final class ChatModel {
         conversation.usage = usage
         conversation.estimatedCost = estimatedCost
         conversation.compaction = compaction
+        conversation.planMode = isPlanMode
+        conversation.todos = todos
         conversation.savedAt = Date()
         if let index = conversations.firstIndex(where: { $0.id == currentConversationID }) {
             conversations[index] = conversation

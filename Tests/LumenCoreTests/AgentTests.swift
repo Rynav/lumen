@@ -157,7 +157,7 @@ final class MockProvider: LLMProvider, @unchecked Sendable {
             if case .message(let message) = event { messages.append(message) }
         }
         #expect(provider.history.count == 2)
-        #expect(provider.tools.first?.map(\.name) == ["list_files", "read_file", "search_files"])
+        #expect(provider.tools.first?.map(\.name) == ["list_files", "read_file", "search_files", "update_todos"])
         let results = provider.history[1].flatMap(\.parts).compactMap { part -> ToolResult? in
             if case .toolResult(let result) = part { return result }; return nil
         }
@@ -211,8 +211,8 @@ final class MockProvider: LLMProvider, @unchecked Sendable {
         // Without an approval gate the tools that need a live user channel are
         // withheld from every request, and the final request advertises nothing at all.
         #expect(provider.tools.count == 3)
-        #expect(provider.tools[0].map(\.name) == ["list_files", "read_file", "search_files"])
-        #expect(provider.tools[1].map(\.name) == ["list_files", "read_file", "search_files"])
+        #expect(provider.tools[0].map(\.name) == ["list_files", "read_file", "search_files", "update_todos"])
+        #expect(provider.tools[1].map(\.name) == ["list_files", "read_file", "search_files", "update_todos"])
         #expect(provider.tools[2].isEmpty)
         // The unknown extra tool is not executed; its call still gets an error result.
         let results = provider.history[2].flatMap(\.parts).compactMap { part -> ToolResult? in

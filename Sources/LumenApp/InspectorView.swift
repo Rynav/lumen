@@ -4,6 +4,7 @@ import SwiftUI
 /// Inspector sections, mirroring the workspace surfaces of the agent.
 enum InspectorTab: String, CaseIterable, Identifiable {
     case activity = "Activity"
+    case plan = "Plan"
     case changes = "Changes"
     case git = "Git"
     case files = "Files"
@@ -34,6 +35,7 @@ struct InspectorView: View {
     @ViewBuilder private var content: some View {
         switch tab {
         case .activity: ActivitySection(chat: chat)
+        case .plan: PlanSection(chat: chat)
         case .changes: ChangesSection(chat: chat)
         case .git: GitSection(chat: chat)
         case .files: FilesSection(chat: chat)
@@ -135,6 +137,82 @@ private struct ActionRow: View {
         .padding(LumenStyle.space2)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: LumenStyle.radiusSmall, style: .continuous))
         .accessibilityElement(children: .contain)
+    }
+}
+
+// MARK: - Plan
+
+private struct PlanSection: View {
+    @Bindable var chat: ChatModel
+
+    private var completed: Int { chat.todos.filter { $0.status == .completed }.count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Group {
+                if chat.todos.isEmpty {
+                    InspectorEmptyState(title: "No checklist yet", systemImage: "checklist",
+                                        message: chat.isPlanMode
+                                            ? "Lumen records the plan here while it explores the project read-only."
+                                            : "Turn on Plan in the composer to explore first, or ask for multi-step work and Lumen tracks its steps here.")
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: LumenStyle.space3) {
+                            HStack {
+                                Text("\(completed) of \(chat.todos.count) done")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                if chat.isPlanMode {
+                                    Text("Planning · read-only").font(.caption).foregroundStyle(Color.accentColor)
+                                }
+                            }
+                            ForEach(Array(chat.todos.enumerated()), id: \.offset) { _, item in
+                                HStack(alignment: .firstTextBaseline, spacing: LumenStyle.space2) {
+                                    Image(systemName: symbol(item.status))
+                                        .foregroundStyle(color(item.status))
+                                        .frame(width: 16)
+                                    Text(item.content)
+                                        .font(.callout)
+                                        .strikethrough(item.status == .completed)
+                                        .foregroundStyle(item.status == .completed ? .secondary : .primary)
+                                        .textSelection(.enabled)
+                                    Spacer(minLength: 0)
+                                }
+                            }
+                        }
+                        .padding(LumenStyle.space4)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            if chat.isPlanMode {
+                Divider()
+                VStack(alignment: .leading, spacing: LumenStyle.space2) {
+                    Button("Start Building", systemImage: "hammer") { chat.startBuilding() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(chat.isBusy)
+                    Text("Leaves plan mode and asks Lumen to implement the checklist.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(LumenStyle.space4)
+            }
+        }
+    }
+
+    private func symbol(_ status: TodoItem.Status) -> String {
+        switch status {
+        case .pending: "circle"
+        case .inProgress: "clock"
+        case .completed: "checkmark.circle.fill"
+        }
+    }
+
+    private func color(_ status: TodoItem.Status) -> Color {
+        switch status {
+        case .pending: .secondary
+        case .inProgress: .accentColor
+        case .completed: LumenStyle.success
+        }
     }
 }
 

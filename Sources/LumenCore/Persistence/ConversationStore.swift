@@ -26,20 +26,23 @@ public struct ConversationSnapshot: Codable, Equatable, Identifiable, Sendable {
     public var usage: TokenUsage?
     public var estimatedCost: Double?
     public var compaction: ConversationCompaction?
+    public var planMode: Bool
+    public var todos: [TodoItem]
     public var savedAt: Date
 
     public init(id: UUID, projectPath: String?, title: String? = nil, messages: [Message],
                 changes: [AppliedChange] = [], draft: String,
                 profileID: UUID?, usage: TokenUsage?, estimatedCost: Double?,
-                compaction: ConversationCompaction? = nil, savedAt: Date) {
+                compaction: ConversationCompaction? = nil, planMode: Bool = false,
+                todos: [TodoItem] = [], savedAt: Date) {
         self.id = id; self.projectPath = projectPath; self.title = title; self.messages = messages
         self.changes = changes; self.draft = draft
         self.profileID = profileID; self.usage = usage; self.estimatedCost = estimatedCost
-        self.compaction = compaction; self.savedAt = savedAt
+        self.compaction = compaction; self.planMode = planMode; self.todos = todos; self.savedAt = savedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, projectPath, title, messages, changes, draft, profileID, usage, estimatedCost, compaction, savedAt
+        case id, projectPath, title, messages, changes, draft, profileID, usage, estimatedCost, compaction, planMode, todos, savedAt
     }
 
     /// Files written before titles and change ledgers existed still restore.
@@ -55,6 +58,8 @@ public struct ConversationSnapshot: Codable, Equatable, Identifiable, Sendable {
         usage = try container.decodeIfPresent(TokenUsage.self, forKey: .usage)
         estimatedCost = try container.decodeIfPresent(Double.self, forKey: .estimatedCost)
         compaction = try container.decodeIfPresent(ConversationCompaction.self, forKey: .compaction)
+        planMode = (try? container.decodeIfPresent(Bool.self, forKey: .planMode)) ?? false
+        todos = (try? container.decodeIfPresent([TodoItem].self, forKey: .todos)) ?? []
         savedAt = try container.decode(Date.self, forKey: .savedAt)
     }
 }

@@ -32,6 +32,7 @@
 |---|---|
 | **Agent tools** | list files, read numbered text, search literals, edit, patch many files, run shell commands |
 | **Approvals** | Review everything · Auto-approve edits · Full Auto — plus a denylist that no mode can override |
+| **Plan mode** | read-only exploration, a checklist kept in the Plan tab, and one-click Start Building |
 | **Visual diffs** | numbered red/green review, per-file selection for multi-file patches, guarded Undo that survives restarts |
 | **Workspace panel** | Activity, Changes, Files and Git tabs, one keystroke away (⌘⌥I); right-click a file to open it in your editor or reveal it in Finder |
 | **Context care** | token gauge, auto-summarizing of old turns, streaming responses with a Stop that really stops |
@@ -94,6 +95,8 @@ Choose **ChatGPT Account → Continue with ChatGPT** and approve in your browser
 ## How it works
 
 **Approvals.** *Review everything* (default) asks before each edit and command, *Auto-approve edits* applies file changes immediately, and *Full Auto* also runs commands without prompting. The command denylist blocks dangerous programs and options in every mode, and approval can never override it.
+
+**Plan mode.** Toggle *Plan* in the composer for a read-only first pass. Lumen can inspect the project and ask questions, but edits and commands are not advertised or accepted. It records the steps with `update_todos`; the Plan tab shows the checklist and a **Start Building** button that leaves plan mode and executes it. The checklist is saved with the chat and stays in later requests even after context compaction.
 
 **Edits.** `edit_file` replaces one exact, unique text block; `apply_patch` takes a whole `*** Begin Patch` and shows a single review where you pick which files land. Files are checked and atomically swapped with permissions, ACLs and timestamps preserved, and each one is backed up to `.lumen/backups` before it changes — that's what Undo restores, even after a restart. Add `.lumen/` to your project's `.gitignore` if you don't want snapshots tracked. The agent cannot edit Git internals or `.lumen` itself.
 

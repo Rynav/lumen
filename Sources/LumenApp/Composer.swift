@@ -13,7 +13,8 @@ struct Composer: View {
     @State private var imageError: String?
 
     private var placeholder: String {
-        chat.workspace == nil ? "Message Lumen…" : "What would you like to work on?"
+        if chat.workspace == nil { return "Message Lumen…" }
+        return chat.isPlanMode ? "Describe what you want planned…" : "What would you like to work on?"
     }
 
     private var canSend: Bool {
@@ -99,6 +100,7 @@ struct Composer: View {
                 providerMenu
                 modelMenu
                 reasoningMenu
+                planButton
                 Spacer(minLength: 0)
                 sendButton
             }
@@ -229,6 +231,20 @@ struct Composer: View {
                         select: { chat.model = $0; showingModels = false },
                         refresh: { await chat.loadModels() })
         }
+    }
+
+    private var planButton: some View {
+        Button { chat.setPlanMode(!chat.isPlanMode) } label: {
+            Label(chat.isPlanMode ? "Planning" : "Plan", systemImage: "checklist")
+                .foregroundStyle(chat.isPlanMode ? Color.accentColor : .secondary)
+        }
+        .buttonStyle(.borderless)
+        .fixedSize()
+        .disabled(chat.isBusy || chat.workspace == nil)
+        .accessibilityLabel(chat.isPlanMode ? "Turn off plan mode" : "Turn on plan mode")
+        .help(chat.isPlanMode
+              ? "Plan mode is read-only: Lumen explores and writes a checklist; edits and commands are disabled."
+              : "Plan first: explore the project read-only, then build from a checklist.")
     }
 
     private var reasoningMenu: some View {

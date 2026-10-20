@@ -108,6 +108,14 @@ public enum SystemPrompt {
     By default, match the surrounding comment density: where the code has none, add none. Use comments sparingly, only where they are appropriate, such as for behavior that is not obvious from the code itself. Instructions from the user or the project take precedence over this guidance.
     """
 
+    /// Appended while the composer's Plan toggle is on. Plan mode is also enforced
+    /// by the advertised tool set; this tells the model why and what to produce.
+    public static let planning = """
+    # Plan mode
+    You are in plan mode: a read-only first pass. File edits, patches, and commands are not available, so never claim to have changed anything. Inspect the project enough to make the plan concrete and to resolve avoidable uncertainty.
+    Record the plan with update_todos as a short checklist, one item per meaningful step, all pending. Then reply with the plan, the files or systems it touches, and any decisions the user must make. Stop after the plan; the user decides when to build.
+    """
+
     /// Sent as an assistant message on the final permitted request, with no tools
     /// advertised, so an exhausted agent summarizes instead of silently stopping.
     public static let maxSteps = """
@@ -134,12 +142,14 @@ public enum SystemPrompt {
         template.replacingOccurrences(of: placeholder, with: toolGuidance(tools: tools).joined(separator: "\n"))
     }
 
-    /// The system message for one request: the first part is the agent's own
-    /// prompt or the base prompt (with any model-family override), the second is
-    /// the instruction baseline.
+    /// The system message for one request: the agent's own prompt or the base
+    /// prompt (with any model-family override), optional plan-mode rules, then the
+    /// instruction baseline.
     public static func system(agentPrompt: String, tools: [String], modelID: String,
-                              instructions: [InstructionSource]) -> String {
-        [firstPart(agentPrompt: agentPrompt, tools: tools, modelID: modelID), Instructions.render(instructions)]
+                              instructions: [InstructionSource], planMode: Bool = false) -> String {
+        [firstPart(agentPrompt: agentPrompt, tools: tools, modelID: modelID),
+         planMode ? planning : "",
+         Instructions.render(instructions)]
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
     }
@@ -159,6 +169,9 @@ public enum SystemPrompt {
         var lines: [String] = []
         if tools.contains(where: { readTools.contains($0) }) {
             lines.append("- Use list_files to locate files, search_files for literal text, and read_file for the relevant source. Narrow searches and paginate bounded reads rather than repeatedly dumping the whole project. You may request multiple independent reads or searches in one turn.")
+        }
+        if tools.contains("update_todos") {
+            lines.append("- Keep the checklist current with update_todos. Pass the full list each time, keep exactly one step in progress, and mark steps completed as soon as they are done.")
         }
         if tools.contains("edit_file") {
             lines.append("- Make minimal, focused edits through edit_file using an exact, unique old_text match. Read current contents before editing. Do not overwrite unrelated user changes or remove files without authorization.")

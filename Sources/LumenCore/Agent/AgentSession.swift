@@ -11,6 +11,7 @@ public enum AgentEvent: Sendable {
     case commandApproval(CommandProposal)
     case command(CommandUpdate)
     case question(UserQuestion)
+    case todos([TodoItem])
 }
 
 public actor AgentSession {
@@ -43,6 +44,7 @@ public actor AgentSession {
 
     public nonisolated func run(messages: [Message], model: String, provider: any LLMProvider,
                                workspace: WorkspaceService?, maxIterations: Int, approval: ApprovalGate? = nil,
+                               planMode: Bool = false,
                                extraTools: [ToolDefinition] = [],
                                executeExtraTool: (@Sendable (ToolCall) async -> ToolResult?)? = nil) -> AsyncThrowingStream<AgentEvent, any Error> {
         AsyncThrowingStream { continuation in
@@ -54,7 +56,8 @@ public actor AgentSession {
                 do {
                     try await self.execute(messages: messages, model: model, provider: provider,
                                            workspace: workspace, maxIterations: maxIterations, approval: approval,
-                                           extraTools: extraTools, executeExtraTool: executeExtraTool, output: continuation)
+                                           planMode: planMode, extraTools: extraTools,
+                                           executeExtraTool: executeExtraTool, output: continuation)
                     continuation.finish()
                 } catch { continuation.finish(throwing: error) }
             }
@@ -64,12 +67,15 @@ public actor AgentSession {
 
     private func execute(messages: [Message], model: String, provider: any LLMProvider,
                          workspace: WorkspaceService?, maxIterations: Int, approval: ApprovalGate?,
-                         extraTools: [ToolDefinition],
+                         planMode: Bool, extraTools: [ToolDefinition],
                          executeExtraTool: (@Sendable (ToolCall) async -> ToolResult?)?,
                          output: AsyncThrowingStream<AgentEvent, any Error>.Continuation) async throws {
         var history = messages
-        let registry = workspace.map(ToolRegistry.init)
-        let advertised = (registry == nil ? [] : ToolRegistry.definitions(approvalIsEnabled: approval != nil)) + extraTools
+        let registry = workspace.map { ToolRegistry(workspace: $0, planMode: planMode) }
+        // MCP tools can change things outside Lumen's knowledge, so planning never
+        // advertises or runs them.
+        let extra = planMode ? [] : extraTools
+        let advertised = (registry == nil ? [] : ToolRegistry.definitions(approvalIsEnabled: approval != nil, planMode: planMode)) + extra
         let iterations = max(1, min(maxIterations, 1_000))
         for iteration in 0..<iterations {
             try Task.checkCancellation()
@@ -127,7 +133,7 @@ public actor AgentSession {
             for call in calls {
                 try Task.checkCancellation()
                 let result: ToolResult
-                if call.name.hasPrefix("mcp__"), let executeExtraTool, let extra = await executeExtraTool(call) {
+                if !planMode, call.name.hasPrefix("mcp__"), let executeExtraTool, let extra = await executeExtraTool(call) {
                     result = extra
                 } else if let registry {
                     result = try await registry.execute(call, approval: approval,
@@ -135,7 +141,7 @@ public actor AgentSession {
                         onBatchProposal: { output.yield(.editBatch($0)) },
                         onApplied: { output.yield(.applied($0)) },
                         onCommandProposal: { output.yield(.commandApproval($0)) }, onCommandUpdate: { output.yield(.command($0)) },
-                        onQuestion: { output.yield(.question($0)) })
+                        onQuestion: { output.yield(.question($0)) }, onTodos: { output.yield(.todos($0)) })
                 }
                 else { result = ToolResult(callID: call.id, content: "Open a project folder to use tools.", isError: true) }
                 let message = Message(role: .tool, parts: [.toolResult(result)])
